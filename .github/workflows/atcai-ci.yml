@@ -1,0 +1,41 @@
+# ---------------------------------------------------------------------------
+# Runs ATCAI's tests whenever its code changes.
+#
+# GitHub Actions is free automation running on GitHub's machines; nothing here
+# runs on your PC. A red X on a commit (and an email) means something broke.
+# This is what the "build" badge in the README reports.
+#
+# Releases are handled separately, in atcai-release.yml.
+# ---------------------------------------------------------------------------
+
+name: ATCAI
+
+on:
+  push:
+    branches: [main]
+    # Scoped to this module so other modules in the repo don't trigger it.
+    # Note: path filters are why this file must not handle tags - a tag points
+    # at an already-pushed commit, so nothing looks "changed" and the run is
+    # skipped. Tags live in atcai-release.yml, which has no path filter.
+    paths: ["ATCAI/**", ".github/workflows/atcai-ci.yml"]
+  pull_request:
+    paths: ["ATCAI/**", ".github/workflows/atcai-ci.yml"]
+  workflow_dispatch:          # lets you run it by hand from the Actions tab
+
+defaults:
+  run:
+    working-directory: ATCAI
+
+jobs:
+  test:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: python -m pip install --upgrade pip pytest
+      # The Lua suites need DCS's own interpreter, which no build machine has,
+      # so those skip here and are run locally before a release. The installer,
+      # voice bridges and manager window are all covered.
+      - run: python -m pytest tests -v

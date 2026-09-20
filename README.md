@@ -7,7 +7,7 @@ Each module lives in its own folder with its own documentation, tests and releas
 
 ## [ATCAI](ATCAI/) — an air traffic controller you can talk to
 
-[![ATCAI build](https://img.shields.io/github/actions/workflow/status/h4cklife/DCS/atcai.yml?branch=main&label=build&logo=github)](https://github.com/h4cklife/DCS/actions/workflows/atcai.yml)
+[![ATCAI build](https://img.shields.io/github/actions/workflow/status/h4cklife/DCS/atcai-ci.yml?branch=main&label=build&logo=github)](https://github.com/h4cklife/DCS/actions/workflows/atcai-ci.yml)
 [![Latest release](https://img.shields.io/github/v/release/h4cklife/DCS?filter=atcai-v*&label=release)](https://github.com/h4cklife/DCS/releases)
 [![Licence](https://img.shields.io/github/license/h4cklife/DCS)](LICENSE)
 
