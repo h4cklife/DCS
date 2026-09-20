@@ -1,0 +1,14 @@
+# Build output
+**/build/
+**/dist/
+*.spec
+
+# Python
+__pycache__/
+*.py[cod]
+**/venv/
+.pytest_cache/
+
+# Generated at runtime inside a DCS install, never committed
+inbox.lua
+config.lua
