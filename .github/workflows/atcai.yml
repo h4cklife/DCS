@@ -1,0 +1,91 @@
+# ---------------------------------------------------------------------------
+# What this file is
+#
+# GitHub Actions is free automation that runs on GitHub's computers. This file
+# tells it what to run and when. Nothing here runs on your PC.
+#
+# It does two things:
+#
+#   1. Every time you push a change to anything under ATCAI/, GitHub starts a
+#      clean Windows machine and runs the test suite. A red X on the commit (and
+#      an email) means something broke. This is also what the "build" badge in
+#      the README reports.
+#
+#   2. When you push a tag that starts with "atcai-v", it also builds
+#      ATCAI-Manager.exe on that clean machine and publishes a GitHub Release
+#      with the exe attached, using ATCAI/CHANGELOG.md as the description.
+#      Players download the exe from that release page.
+#
+# To publish version 1.0.0:
+#
+#     git tag atcai-v1.0.0
+#     git push origin atcai-v1.0.0
+#
+# Tags are prefixed with the module name because this repository holds several
+# DCS modules; another module's release must not collide with ATCAI's.
+#
+# Why it builds on Windows: PyInstaller cannot cross-compile, so a Windows .exe
+# has to be built from Windows Python. Doing it here means you don't need
+# Windows Python installed to cut a release.
+# ---------------------------------------------------------------------------
+
+name: ATCAI
+
+on:
+  push:
+    branches: [main]
+    tags: ["atcai-v*"]
+    paths: ["ATCAI/**", ".github/workflows/atcai.yml"]
+  pull_request:
+    paths: ["ATCAI/**", ".github/workflows/atcai.yml"]
+  workflow_dispatch:          # lets you run it by hand from the Actions tab
+
+defaults:
+  run:
+    working-directory: ATCAI
+
+jobs:
+  test:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: python -m pip install --upgrade pip pytest
+      # The Lua suites need DCS's own interpreter, which no build machine has,
+      # so those skip here and are run locally before a release. The installer,
+      # voice bridges and manager window are all covered.
+      - run: python -m pytest tests -v
+
+  build:
+    needs: test                # never publish something that failed its tests
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: python -m pip install --upgrade pip pyinstaller
+      - run: python manager/build_exe.py
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ATCAI-Manager
+          # Artifact paths are relative to the checkout, not working-directory.
+          path: ATCAI/dist/ATCAI-Manager.exe
+
+  release:
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/atcai-v')
+    runs-on: windows-latest
+    permissions:
+      contents: write          # needed to create the release
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: ATCAI-Manager
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: ATCAI-Manager.exe
+          body_path: ATCAI/CHANGELOG.md
