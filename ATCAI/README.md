@@ -4,10 +4,12 @@
 [![Latest release](https://img.shields.io/github/v/release/h4cklife/DCS?filter=atcai-v*&label=release)](https://github.com/h4cklife/DCS/releases)
 [![Downloads](https://img.shields.io/github/downloads/h4cklife/DCS/total?label=downloads)](https://github.com/h4cklife/DCS/releases)
 [![Licence](https://img.shields.io/github/license/h4cklife/DCS)](../LICENSE)
-[![Tests](https://img.shields.io/badge/tests-128-brightgreen)](#tests)
+[![Tests](https://img.shields.io/badge/tests-224-brightgreen)](#tests)
 ![Platform](https://img.shields.io/badge/platform-Windows-0078d4?logo=windows)
 ![DCS World](https://img.shields.io/badge/DCS%20World-single--player-2ea44f)
 ![Python](https://img.shields.io/badge/python-3.12%2B-3776ab?logo=python&logoColor=white)
+[![Bitcoin](https://img.shields.io/badge/Bitcoin-donate-f7931a?logo=bitcoin&logoColor=white)](#support-the-project)
+[![Ethereum](https://img.shields.io/badge/Ethereum-donate-3c3c3d?logo=ethereum&logoColor=white)](#support-the-project)
 
 An AI air traffic controller for DCS World single-player: startup, taxi, takeoff,
 circuit joins, landing and loadout callouts. You can talk to it and it talks back —
@@ -34,12 +36,15 @@ and roadmap.
 | 3 | Voice input | **Done** — verified in-game, Windows offline speech recognition |
 | 4 | Spoken ATC replies (SRS TTS, or local Windows TTS) | **Done** — verified in-game, both `--mode srs` and `--mode local` audible |
 | 5 | Richer ATC behaviour — wind-selected runway, live weather, phase enforcement, arrivals | **Done** — verified in-game |
-| 6 | Traffic awareness — holds, sequencing, go-arounds | **Built** — hard to exercise solo |
+| 6 | Traffic awareness — holds, sequencing, go-arounds | **Done** — verified in-game against AI traffic |
 | 7 | Loads into every mission automatically | **Done** — verified in a stock mission |
 | 8 | Settings file, so nothing needs Lua editing | **Done** |
 | 9 | Installer core (detect DCS, install/remove/enable/disable/settings) | **Done** — `manager/installer.py` |
 | 10 | Manager app + single-file .exe | **Done** — `ATCAI-Manager.exe`, GUI verified on Windows |
-| 11 | Release readiness — remembered settings, player guide, clean-install testing | In progress |
+| 11 | Release readiness — remembered settings, player guide, clean-install testing | **Done** — v1.0.0 published; the released .exe installed from scratch and flown |
+| 12 | Real radio — per-airfield frequencies, ATIS on request and on a loop | **Done** — verified in-game, frequencies and the ATIS loop both |
+| 13 | Push-to-talk, configurable in the manager | **Done** — verified in-game; off by default, key chosen in the app |
+| 14 | Verify traffic awareness in flight | **Done** — flown against `--traffic` AI using the player's field |
 
 ATCAI loads into **every mission you fly** — stock missions, Instant Action, campaigns —
 with no mission editing at all. See Install.
@@ -51,6 +56,13 @@ at an airbase. Open the comms menu (`\` by default) and navigate **F10 (Other...
 F1 (ATCAI)** for:
 
 - **Request radio check** — ATC confirms it hears you.
+- **Request airfield information** — a spoken ATIS: information letter, time, runway in
+  use, wind, temperature and altimeter.
+
+There's also a **repeating ATIS broadcast** on its own frequency (380.000 AM by default,
+every 60s), carrying the information for whichever field you're nearest. Tune in and
+listen rather than asking. Configurable in the manager's Settings tab, including letting
+it pick an unused frequency for you.
 - **Request startup** — approves startup, names the runway in use, gives wind and QNH.
 - **Request taxi** — taxi to the holding point for the active runway, with QNH.
 - **Request takeoff** — takeoff clearance with current wind, or a hold if the runway is
@@ -61,6 +73,16 @@ F1 (ATCAI)** for:
   occupied, or sequencing behind traffic ahead of you.
 - **Request taxi to parking** — after landing, vacate and taxi in.
 - **Request loadout status** — reads back your current weapon/store loadout.
+
+**ATC uses each airfield's real frequencies.** The manager reads them from the game's
+own terrain files at install time, so Batumi answers on Batumi's frequencies and Vaziani
+on Vaziani's — the same numbers DCS's built-in ATC menu shows. Tune to one of them and
+you hear ATC; don't, and you won't, which is how a radio should behave.
+
+This applies to **what you hear, not to what ATC hears.** Speech recognition runs in an
+external Windows process that has no access to your aircraft's radio state, so a spoken
+request reaches ATC whichever frequency you're tuned to — or none at all. Push-to-talk
+gates the microphone, not the radio. See Known limitations.
 
 **Active runway follows the wind.** ATC reads the live wind at the field and picks
 whichever runway end has the best headwind, so the runway in use changes with the
@@ -103,8 +125,9 @@ The manager needs the same restart of DCS that a manual install does, and it say
 If you'd rather not use the app, it's two copies and a restart. Nothing per-mission.
 
 1. Copy everything in `lua/atc/` into `<Saved Games>\DCS\Scripts\ATCAI\`
-   (`atc_config.lua`, `atc_core.lua`, `atc_traffic.lua`, `atc_menu.lua`,
-   `atc_inbox.lua`). The voice inbox and settings files are created in that same folder.
+   (`atc_config.lua`, `atc_core.lua`, `atc_traffic.lua`, `atc_atis.lua`,
+   `atc_menu.lua`, `atc_inbox.lua`). The voice inbox, settings and generated frequency
+   files are created in that same folder.
 2. Copy `lua/hooks/atcai_autoload.lua` into `<Saved Games>\DCS\Scripts\Hooks\`.
 3. Restart DCS. Hooks are only read at startup.
 
@@ -136,12 +159,35 @@ without the hook installed, and for setting a mission's start time:
    tools/build_test_mission.py <source.miz> ATCAI-test.miz \
        'C:\Users\<you>\Saved Games\DCS\Scripts\ATCAI\atc_core.lua' \
        'C:\Users\<you>\Saved Games\DCS\Scripts\ATCAI\atc_traffic.lua' \
+       'C:\Users\<you>\Saved Games\DCS\Scripts\ATCAI\atc_atis.lua' \
        'C:\Users\<you>\Saved Games\DCS\Scripts\ATCAI\atc_menu.lua' \
        'C:\Users\<you>\Saved Games\DCS\Scripts\ATCAI\atc_inbox.lua' \
        --start-time 12:00
    ```
    `--start-time HH:MM` overrides the mission clock — worth setting, since many stock
    missions start at midnight and testing an airfield in the dark gets old.
+
+   `--traffic N` adds N AI flights that take off from the player's own airfield and come
+   straight back to land, which is the only practical way to exercise traffic awareness:
+   flying alone, nothing ever occupies the runway or turns up on final. `--traffic-type`
+   picks the aircraft (Su-25T by default, since it ships with every DCS install) and
+   `--traffic-spacing` sets the gap between flights.
+
+   `--ground N` scatters N enemy vehicle groups around the airfields the mission uses,
+   so the test mission is worth flying for its own sake. `--ground-defended` gives them
+   anti-aircraft cover, and `--ground-radius` sets how far out they sit. Targets go on
+   the coalition the player isn't on, using core DCS vehicles so the mission works
+   without owning extra modules.
+
+   `--enemy-air N` adds hostile fighter flights that are airborne, tasked to engage, and
+   active from the moment the mission starts. Stock missions commonly leave their enemy
+   flights on `lateActivation`, waiting for triggers tied to that mission's own
+   objectives, so a mission reused for testing can look fully populated and still never
+   produce a fight. `--enemy-air-type`, `--enemy-air-size`, `--enemy-air-radius` and
+   `--enemy-air-altitude` tune them.
+
+   The tool refuses to overwrite an existing mission unless you pass `--force`, so
+   building a new variant never costs you the last one.
    `<source.miz>` can be any existing mission with a ramp-parked player aircraft — a
    stock Instant Action mission works well. The tool copies it and injects a MISSION
    START trigger that sets the inbox path and `dofile()`s each script in order.
@@ -181,7 +227,8 @@ ignored on its own rather than discarding the rest of the file — so a typo can
 working. Recognised keys are listed in `ATC.CONFIG_FIELDS` in `lua/atc/atc_config.lua`:
 `tts_frequency`, `tts_modulation`, `airbase_search_radius`, `airbase_air_radius`,
 `inbox_poll_seconds`, `traffic_field_radius`, `traffic_roll_speed`,
-`traffic_final_range`, `traffic_final_height`, `traffic_final_arc`.
+`traffic_final_range`, `traffic_final_height`, `traffic_final_arc`, `atis_enabled`,
+`atis_frequency`, `atis_modulation`, `atis_interval`.
 
 The defaults these override, in `lua/atc/atc_core.lua`:
 
@@ -192,6 +239,9 @@ The defaults these override, in `lua/atc/atc_core.lua`:
 - `ATC.TTS_FREQUENCY` / `ATC.TTS_MODULATION` — the radio channels ATC transmits on.
 - `ATC.INBOX_POLL_SECONDS` in `atc_inbox.lua` (default `0.3`) — voice command latency.
 
+The repeating ATIS broadcast is configured on the manager's Settings tab, or via
+`atis_enabled`, `atis_frequency`, `atis_modulation` and `atis_interval` in `config.lua`.
+
 In `lua/atc/atc_traffic.lua`, if ATC is too cautious or not cautious enough:
 
 - `ATC.TRAFFIC_ROLL_SPEED` (default `15` m/s) — above this, a ground aircraft counts as
@@ -201,11 +251,11 @@ In `lua/atc/atc_traffic.lua`, if ATC is too cautious or not cautious enough:
 
 ## Test / run for actual gameplay
 
-1. Launch DCS → open the mission browser from the main menu → pick `ATCAI-test` from
-   your Missions folder → **Fly**. On spawn you should see an on-screen
-   "ATCAI ready" confirmation message.
-2. Once you've spawned in and control is handed to you, press **`\`** to open the comms
-   menu (not the F10 key — that's the map view).
+1. Launch DCS and fly **any** mission with a player-controlled aircraft — Instant Action
+   is fine. ATCAI is loaded by the hook, so no particular mission is needed. On spawn you
+   should see an on-screen **"ATCAI ready"** message.
+2. Once control is handed to you, press **`\`** to open the comms menu (not the F10 key —
+   that's the map view).
 3. Navigate **F10 (Other...) → F1 (ATCAI)**. Custom mission menus always live under the
    "Other" submenu, not at the top level. Don't confuse this with the stock **ATC**
    entry on the main comms list — that's a built-in DCS feature (airport list,
@@ -213,29 +263,35 @@ In `lua/atc/atc_traffic.lua`, if ATC is too cautious or not cautious enough:
 4. Press the number for the option you want to try — this sends the request and closes
    the menu; watch the top-left of the screen for ATC's reply as on-screen text:
    - Request radio check → expect a "read you five by five" message.
-   - Request taxi → expect a taxi clearance message naming a runway.
+   - Request startup → expect the runway in use, wind and QNH.
    - Request takeoff *before* requesting taxi → expect ATC to refuse and tell you to
      request taxi first.
-   - Request taxi, then request takeoff → expect a takeoff clearance message.
+   - Request taxi, then request takeoff → expect a takeoff clearance naming a runway.
+   - Request landing while parked → expect a refusal, since you're on the ground.
    - Request loadout status → expect your current stores listed back to you.
 5. To try another option, press `\` again to reopen the comms menu — it doesn't stay
    open between requests.
-6. To check the scripts loaded without errors, open the DCS log
+6. To confirm everything loaded, open the DCS log
    (`%USERPROFILE%\Saved Games\DCS\Logs\dcs.log`) and look for:
    ```
+   ATCAI: hook injected from ... (ok=true, result=)
    ATCAI: atc_core.lua loaded
+   ATCAI: atc_traffic.lua loaded
    ATCAI: atc_menu.lua executing
    ATCAI: menu built for group ...
-   ATCAI: atc_menu.lua finished
+   ATCAI: atc_inbox.lua loaded, polling ...
    ```
-   If these are missing, the mission-start trigger didn't run — confirm you're flying
-   the built `ATCAI-test.miz` and that the script paths baked into it match where the
-   files actually are.
+   No `hook injected` line means the hook isn't installed or DCS wasn't restarted after
+   installing. The line present but the rest missing means the injection was rejected —
+   the `result=` field carries the reason.
 
 ## Voice input
 
 Speak your requests instead of using the comms menu. Uses the speech recogniser built
 into Windows — no models to download, no extra packages.
+
+**Players use the Start button on the manager's Voice tab.** The command below runs the
+same code directly, which is what you want while developing:
 
 ```
 python3 voice-bridge/atcai_listen.py
@@ -252,7 +308,7 @@ Then talk to it the way you'd actually work a radio:
 (`VERB_VARIANTS` in `atcai_listen.py`), so the two can't drift apart. A test enforces it.
 
 The request itself has to be one of the phrasings it knows (`--list-phrases` shows all
-41 across the 8 requests), but **anything can surround it** — your callsign, the tower's
+48 across the 9 requests), but **anything can surround it** — your callsign, the tower's
 name, a runway, "over". The recogniser is given a wildcard either side of the request, so
 it doesn't have to match your whole transmission; the request is then picked out of the
 recognised text, longest match first (so "requesting taxi to parking" is parking, not
@@ -301,6 +357,9 @@ spoken reply, which is unusable in a full-screen sim.
 
 ATC replies can be spoken over the radio instead of only appearing as on-screen text,
 using SRS's text-to-speech.
+
+**Players use the Start button on the manager's Voice tab**, which runs this in-process.
+The commands below are the same code run directly, for development.
 
 **How it works:** the mission sandbox can't launch processes or write files, so
 `atc_core.lua` emits each reply to `dcs.log` as `ATCAI_TTS|<freq>|<modulation>|<text>`.
@@ -427,8 +486,8 @@ change.
 
 ## Known limitations
 
-- Airbase detection is proximity-only — no concept of which parking spot you're in, no
-  multi-airbase disambiguation if two are within 6 km of each other.
+- Airbase detection is proximity-only — no concept of which parking spot you're in, and
+  no disambiguation if two fields are both in range.
 - Traffic awareness is inferred, not measured: DCS doesn't expose runway geometry to
   scripts, so "on the runway" means *on the ground, near the field, moving faster than
   taxi speed*, and "on final" means *low, close, and tracking the landing heading*. An
@@ -437,8 +496,14 @@ change.
   (left/right downwind) or your position relative to the field.
 - The comms menu always shows every request; invalid ones are refused when used rather
   than hidden.
-- Voice input listens continuously — there's no push-to-talk, so it can trigger on
-  conversation or stream audio. Raise `--min-confidence` if it fires spuriously.
+- Voice input listens continuously unless you turn on push-to-talk in the manager.
+  Push-to-talk is Windows-only (it needs `GetAsyncKeyState` to see the key while DCS has
+  focus); elsewhere the setting is ignored and it keeps listening.
+- **Transmitting isn't frequency-checked.** ATC replies on the field's real frequency, so
+  hearing it requires being tuned in — but it will answer a request made on any frequency,
+  or with the radio off. The recogniser is an external process and can't see the
+  aircraft's radio; closing that gap would mean reading radio state from the sim side and
+  gating requests on it.
 - Voice commands are delivered to every player aircraft registered in the mission. Fine
   for single-player, wrong for multiplayer (which is out of scope anyway).
 - The *request* must be one of the known phrasings, even though anything may surround it.
@@ -446,40 +511,73 @@ change.
 - Callsigns, airfield names and runway numbers you speak are matched loosely and then
   discarded — ATC doesn't check that the runway you asked for is the one in use, and it
   always answers as if the call were addressed to it.
-- Input is comms-menu only; no voice yet (Phase 3).
-- ATC transmits on a fixed list of frequencies (`ATC.TTS_FREQUENCY`) rather than the
-  real frequency of the airfield you're at — the scripting API doesn't expose per-airbase
-  ATC frequencies. The list is deliberately broad so you hear ATC without retuning.
-- Spoken replies need the SRS server, SRS client, and the bridge script all running;
-  without them ATC still works as on-screen text.
-- No persistence — state resets if the mission restarts.
-- Each mission you want ATCAI in must be built with `tools/build_test_mission.py`, until
-  the Hooks autoloader issue above is resolved.
+- If the manager can't find your DCS **game** folder (as opposed to Saved Games), the
+  real frequency table can't be generated and ATC falls back to the fixed list in
+  `ATC.TTS_FREQUENCY`.
+- Spoken replies over the radio need the SRS server and client running. The
+  speakers option (`--mode local`) has no such dependency.
+- Your ATC phase resets when a mission restarts; ATC won't remember that you were
+  already cleared to taxi.
+- Voice input and spoken replies only work while the manager app is running. ATC's
+  on-screen text works without it.
 
 ## Repo layout
 
 ```
 ATCAI/
-├── README.md              you are here — kept up to date after every change
-├── docs/PLAN.md            architecture and full roadmap
-├── lua/atc/                ATC state machine, menu, and inbound voice bridge
-│   ├── atc_config.lua       applies user settings over script defaults
-│   ├── atc_core.lua         phases, phraseology, wind/runway/weather logic
-│   ├── atc_traffic.lua      who else is using the runway
-│   ├── atc_menu.lua         comms menu + player registry
-│   └── atc_inbox.lua        polls the voice inbox file via dofile
-├── lua/hooks/               atcai_autoload.lua — loads ATCAI into every mission
-├── GETTING-STARTED.md        the guide for players, not developers
-├── manager/                  the app users run
-│   ├── app.py               Tkinter window: install, enable, settings, voice buttons
-│   ├── installer.py         finds DCS, installs/removes/enables, writes settings
-│   ├── prefs.py             the app's own remembered settings
-│   └── build_exe.py         packages it all into one self-contained executable
-├── tools/                    build_test_mission.py — injects the loader trigger into a
-│                             copy of any .miz; run_tests.sh + test_atc_core.lua — unit
-│                             tests on DCS's own Lua, plus test_voice_bridge.py —
-│                             no sim needed for any of them
-├── voice-bridge/             atcai_tts.py — speaks ATC replies (SRS or local TTS)
-│                             atcai_listen.py + recognize.ps1 — voice input
-└── assets/audio/             unused — SRS TTS replaced the pre-recorded-clip plan
+├── GETTING-STARTED.md      the guide for players
+├── README.md               this file — for developers
+├── CHANGELOG.md            what changed, written for players
+├── docs/
+│   ├── PLAN.md             architecture, and why it's built this way
+│   └── INSTALLER-PLAN.md   how the manager app came about
+├── lua/atc/                the ATC itself, loaded into every mission
+│   ├── atc_config.lua      applies user settings over script defaults
+│   ├── atc_core.lua        phases, phraseology, wind/runway/weather logic
+│   ├── atc_traffic.lua     who else is using the runway
+│   ├── atc_atis.lua        the repeating airfield information broadcast
+│   ├── atc_menu.lua        comms menu + player registry
+│   └── atc_inbox.lua       polls the voice inbox file via dofile
+├── lua/hooks/
+│   └── atcai_autoload.lua  loads all of the above into every mission
+├── manager/                the app users run
+│   ├── app.py              the window: install, enable, settings, voice buttons
+│   ├── installer.py        finds DCS, installs/removes/enables, writes settings
+│   ├── prefs.py            the app's own remembered settings
+│   └── build_exe.py        packages it into one self-contained executable
+├── voice-bridge/
+│   ├── atcai_listen.py     speech recognition -> the mission's inbox
+│   ├── recognize.ps1       the Windows recogniser itself
+│   └── atcai_tts.py        dcs.log -> spoken replies (SRS or local audio)
+├── tests/                  pytest: installer, prefs, voice bridge, GUI, and the
+│                           Lua suites run on DCS's own interpreter
+└── tools/
+    ├── run_tests.sh        runs everything
+    ├── test_*.lua          the Lua suites themselves
+    └── build_test_mission.py   makes a .miz carrying ATCAI, and can add AI
+                                traffic and ground targets for testing
 ```
+
+## Support the project
+
+ATCAI is free and open source, and built in spare time. If it added something to your
+flying, a donation is a genuine help — it pays for the DCS modules and terrains used to
+test against, and it buys the time to keep the project maintained as DCS updates break
+things.
+
+There's no obligation and nothing is held back: every feature works for everyone.
+
+**Bitcoin (BTC)**
+
+```
+bc1q0mp57a896yqcsvnnvrrnygelpg4yw6rs6wfcgj
+```
+
+**Ethereum (ETH)**
+
+```
+0x310965c1cecb8e79e9afba219a6b8c4b2887851f
+```
+
+Not in a position to donate? Starring the repository, reporting a bug clearly, or
+telling another DCS player about it all help just as much.

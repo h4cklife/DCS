@@ -24,6 +24,7 @@ SUITES = {
     "core": ("test_atc_core.lua", [ATC / "atc_core.lua"]),
     "inbox": ("test_atc_inbox.lua", [ATC / "atc_core.lua", ATC / "atc_inbox.lua"]),
     "traffic": ("test_atc_traffic.lua", [ATC / "atc_core.lua", ATC / "atc_traffic.lua"]),
+    "atis": ("test_atc_atis.lua", [ATC / "atc_core.lua", ATC / "atc_atis.lua"]),
     "hook": ("test_hook_injection.lua", [ROOT / "lua" / "hooks" / "atcai_autoload.lua"]),
 }
 

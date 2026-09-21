@@ -33,6 +33,7 @@ local function buildMenuForUnit(unit)
 
         -- Ordered as a sortie runs: check in, depart, arrive, then utility.
         missionCommands.addCommandForGroup(groupId, "Request radio check", root, ATC.requestRadioCheck, params)
+        missionCommands.addCommandForGroup(groupId, "Request airfield information", root, ATC.requestATIS, params)
         missionCommands.addCommandForGroup(groupId, "Request startup", root, ATC.requestStartup, params)
         missionCommands.addCommandForGroup(groupId, "Request taxi", root, ATC.requestTaxi, params)
         missionCommands.addCommandForGroup(groupId, "Request takeoff", root, ATC.requestTakeoff, params)
@@ -79,6 +80,15 @@ if not ATC.pollInbox and ATCAI_SCRIPT_DIR then
     local ok, err = pcall(dofile, ATCAI_SCRIPT_DIR .. "atc_inbox.lua")
     if not ok then
         env.info("ATCAI: could not auto-load atc_inbox.lua: " .. tostring(err))
+    end
+end
+
+-- Loaded after the player registry exists, since the broadcast needs to know who's
+-- flying and which field they're near.
+if not ATC.broadcastAtis and ATCAI_SCRIPT_DIR then
+    local ok, err = pcall(dofile, ATCAI_SCRIPT_DIR .. "atc_atis.lua")
+    if not ok then
+        env.info("ATCAI: could not auto-load atc_atis.lua: " .. tostring(err))
     end
 end
 

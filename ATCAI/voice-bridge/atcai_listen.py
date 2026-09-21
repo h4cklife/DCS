@@ -36,6 +36,12 @@ INTENT_PHRASES = {
         "how do you read",
         "how do you hear me",
     ],
+    "atis": [
+        "request airfield information",
+        "request field information",
+        "request atis",
+        "say airfield information",
+    ],
     "startup": [
         "request startup",
         "request engine start",
@@ -168,6 +174,54 @@ def windows_path(path):
     return path
 
 
+# Push-to-talk. Recognition finishes *after* you stop speaking, so the key is not
+# usually still down when a result arrives — instead a watcher records when it was last
+# held, and a result counts if the key was down at any point during the utterance.
+PTT_GRACE_SECONDS = 2.5
+
+
+class PushToTalk:
+    """Watches a key globally, so it works while DCS has focus.
+
+    Disabled (or off Windows) it reports every moment as talking, which is the
+    listen-all-the-time behaviour.
+    """
+
+    def __init__(self, enabled=False, key_code=0x11, poll=0.05):
+        self.enabled = bool(enabled) and os.name == "nt"
+        self.key_code = int(key_code or 0x11)
+        self.poll = poll
+        self.last_down = 0.0
+        self._stop = threading.Event()
+        self._thread = None
+
+    def available(self):
+        return os.name == "nt"
+
+    def start(self):
+        if not self.enabled:
+            return
+        self._thread = threading.Thread(target=self._watch, daemon=True)
+        self._thread.start()
+
+    def stop(self):
+        self._stop.set()
+
+    def _watch(self):
+        import ctypes
+        user32 = ctypes.windll.user32
+        while not self._stop.is_set():
+            # High bit set means the key is currently down.
+            if user32.GetAsyncKeyState(self.key_code) & 0x8000:
+                self.last_down = time.time()
+            time.sleep(self.poll)
+
+    def was_talking(self):
+        if not self.enabled:
+            return True
+        return (time.time() - self.last_down) <= PTT_GRACE_SECONDS
+
+
 def resource_dir():
     """Where recognize.ps1 lives, whether running from source or a packaged binary."""
     bundled = getattr(sys, "_MEIPASS", None)
@@ -181,6 +235,7 @@ def build_options(**overrides):
     defaults = dict(
         windows_user=os.environ.get("DCS_WINDOWS_USER", ""),
         inbox=None, min_confidence=0.6, strict=False,
+        ptt_enabled=False, ptt_key_code=0x11, ptt_key_name="Left Ctrl",
     )
     defaults.update(overrides)
     return argparse.Namespace(**defaults)
@@ -213,9 +268,18 @@ def run(args, on_log=None, should_stop=None):
         json.dump(spec, handle)
         phrase_file = handle.name
 
+    ptt = PushToTalk(getattr(args, "ptt_enabled", False),
+                     getattr(args, "ptt_key_code", 0x11))
+    ptt.start()
+
     say("Commands go to %s" % inbox)
     say("%d phrasings, %s matching." % (
         len(lookup), "strict" if args.strict else "flexible"))
+    if ptt.enabled:
+        say("Push-to-talk on: hold %s while speaking."
+            % getattr(args, "ptt_key_name", "your key"))
+    elif getattr(args, "ptt_enabled", False):
+        say("! push-to-talk needs Windows; listening continuously instead")
 
     try:
         proc = subprocess.Popen(
@@ -267,10 +331,14 @@ def run(args, on_log=None, should_stop=None):
             if confidence < args.min_confidence:
                 say('~ heard "%s" (%.2f) - too unclear, ignoring' % (text, confidence))
                 continue
+            if not ptt.was_talking():
+                say('~ heard "%s" but the push-to-talk key was not held' % text)
+                continue
 
             write_inbox(inbox, intent)
             say('-> "%s" (%.2f) -> %s' % (text, confidence, intent))
     finally:
+        ptt.stop()
         if proc.poll() is None:
             proc.terminate()
         try:
@@ -289,11 +357,16 @@ def main():
                         help="ignore recognitions below this confidence (0-1)")
     parser.add_argument("--list-phrases", action="store_true",
                         help="print the phrases ATC understands and exit")
+    parser.add_argument("--ptt-key-code", type=lambda v: int(v, 0), default=0x11,
+                        help="virtual-key code to hold for push-to-talk, e.g. 0x11 for Ctrl")
+    parser.add_argument("--ptt", dest="ptt_enabled", action="store_true",
+                        help="only act on speech while the push-to-talk key is held")
     parser.add_argument("--strict", action="store_true",
                         help="require the request to be the whole utterance, with no "
                              "callsign or other words around it. Less natural, but "
                              "harder to trigger by accident")
     args = parser.parse_args()
+    args.ptt_key_name = "key 0x%02X" % args.ptt_key_code
 
     if args.list_phrases:
         for intent in sorted(INTENT_PHRASES):

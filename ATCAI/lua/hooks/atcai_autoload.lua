@@ -27,7 +27,7 @@ filesystem path.
 ATCAI_HOOK = {}
 
 ATCAI_HOOK.FILES = { "atc_config.lua", "atc_core.lua", "atc_traffic.lua",
-                      "atc_menu.lua", "atc_inbox.lua" }
+                      "atc_menu.lua", "atc_inbox.lua", "atc_atis.lua" }
 
 -- The Lua that will run inside the mission: point at the voice inbox, then load each
 -- script. [[...]] keeps Windows backslashes literal, so nothing needs escaping.

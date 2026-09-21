@@ -26,6 +26,12 @@ DEFAULTS = {
     "strict": False,
     "auto_start_voice": False,
     "auto_start_replies": False,
+    "ptt_enabled": False,
+    "ptt_key_code": 0x11,          # Ctrl
+    "ptt_key_name": "Ctrl",
+    "atis_enabled": True,
+    "atis_auto_frequency": False,
+    "atis_frequency": "380.000",
 }
 
 # Guards against a hand-edited or corrupted file feeding nonsense into the GUI.
@@ -36,6 +42,13 @@ VALIDATORS = {
     "strict": lambda v: isinstance(v, bool),
     "auto_start_voice": lambda v: isinstance(v, bool),
     "auto_start_replies": lambda v: isinstance(v, bool),
+    "ptt_enabled": lambda v: isinstance(v, bool),
+    # Windows virtual-key codes are 1-254.
+    "ptt_key_code": lambda v: isinstance(v, int) and not isinstance(v, bool) and 0 < v < 255,
+    "ptt_key_name": lambda v: isinstance(v, str) and v.strip() != "",
+    "atis_enabled": lambda v: isinstance(v, bool),
+    "atis_auto_frequency": lambda v: isinstance(v, bool),
+    "atis_frequency": lambda v: isinstance(v, str) and v.strip() != "",
 }
 
 

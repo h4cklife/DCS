@@ -107,7 +107,8 @@ do
         eq(loadedFiles[1], DIR .. "atc_config.lua",
             "atc_config loads first, so user settings are in place before any defaults")
         eq(loadedFiles[2], DIR .. "atc_core.lua", "atc_core loads next")
-        eq(loadedFiles[#loadedFiles], DIR .. "atc_inbox.lua", "atc_inbox loads last")
+        eq(loadedFiles[#loadedFiles], DIR .. "atc_atis.lua",
+            "the ATIS broadcast loads last, once the player registry exists")
         eq(sandbox.ATCAI_INBOX_PATH, DIR .. "inbox.lua",
             "the inbox path is set inside the mission environment")
     end

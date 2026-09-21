@@ -3,6 +3,8 @@
 [![Download](https://img.shields.io/github/v/release/h4cklife/DCS?filter=atcai-v*&label=download&color=2ea44f)](https://github.com/h4cklife/DCS/releases)
 [![Licence](https://img.shields.io/github/license/h4cklife/DCS)](../LICENSE)
 ![DCS World](https://img.shields.io/badge/DCS%20World-single--player-2ea44f)
+[![Bitcoin](https://img.shields.io/badge/Bitcoin-donate-f7931a?logo=bitcoin&logoColor=white)](#support-the-project)
+[![Ethereum](https://img.shields.io/badge/Ethereum-donate-3c3c3d?logo=ethereum&logoColor=white)](#support-the-project)
 
 ATCAI gives DCS an air traffic controller you can actually talk to. Ask for startup,
 taxi, takeoff, a circuit join or landing clearance, and it answers out loud — with the
@@ -47,6 +49,15 @@ green when they're running.
 Tick **"Start this automatically when the app opens"** on each and you won't have to
 press them again.
 
+By default ATC listens all the time. If you talk to other people while flying, tick
+**"Only listen while I hold a key"** and choose a key — ATC then only hears you when you
+hold it. Pick a key DCS isn't already using, and keep holding it until you've finished
+the sentence.
+
+The key gates your **microphone**, not your radio: ATC hears a request whatever
+frequency you're tuned to, or with the radio off. Tuning matters for hearing the *reply*
+— see below.
+
 Leave the manager running while you fly. It can sit minimised.
 
 ### What to say
@@ -54,6 +65,7 @@ Leave the manager running while you fly. It can sit minimised.
 Speak like you would on a real radio:
 
 > *"Chevy 81, requesting taxi"*
+> *"Request airfield information"*
 > *"Vaziani Tower, Chevy 81, request startup"*
 > *"Ready for takeoff"*
 > *"Reporting inbound"*
@@ -70,8 +82,8 @@ can see why.
 
 By default ATC comes out of your PC speakers. If you use
 [SimpleRadio Standalone](http://dcssimpleradio.com/), pick **"Send over the radio using
-SRS"** instead, and tune your aircraft radio to one of the frequencies on the Settings
-tab.
+SRS"** instead, and tune your aircraft radio to the airfield's frequency — ATCAI uses
+the real ones, the same numbers DCS's own ATC menu lists for that field.
 
 SRS needs its server *and* client running. If it isn't working, switch back to the
 speakers option — that always works.
@@ -81,6 +93,7 @@ speakers option — that always works.
 | Ask for | You get |
 |---|---|
 | Radio check | Confirmation it can hear you |
+| Airfield information | An ATIS report: letter, time, runway in use, wind, temperature, altimeter |
 | Startup | Approval, the runway in use, wind and altimeter |
 | Taxi | Taxi to the holding point, with the altimeter setting |
 | Takeoff | Clearance with the current wind — or a hold if the runway is busy |
@@ -91,6 +104,18 @@ speakers option — that always works.
 
 ATC also refuses things that don't make sense: no takeoff clearance from your parking
 spot, no landing clearance while you're sitting on the ramp.
+
+## Listening to airfield information
+
+As well as asking for it, ATCAI repeats the field information on its own frequency every
+minute — like a real ATIS. Tune your radio to **380.000 AM** and you'll hear the runway in
+use, wind, temperature and altimeter for whichever field you're nearest.
+
+You can change that frequency on the **Settings** tab, or tick **"Pick one for me"** and
+the manager will choose one no airfield is using. It warns you if you pick a frequency
+that clashes with an airfield, or one most aircraft radios can't tune.
+
+Turn the loop off there too, if you'd rather only hear it when you ask.
 
 ## Settings
 
@@ -125,7 +150,9 @@ said but didn't act, the wording wasn't recognised; if it shows nothing at all, 
 isn't hearing your microphone.
 
 **It reacts when I wasn't talking to it.**
-Drag the "How sure it must be" slider right, or tick "Only react to the exact request".
+Turn on **"Only listen while I hold a key"** on the Voice tab and pick a key — useful if
+you're on Discord or TeamSpeak while flying. You can also drag the "How sure it must be"
+slider right, or tick "Only react to the exact request".
 
 **Windows says the app is unsafe / my antivirus flagged it.**
 See [Is it safe?](#is-it-safe).
@@ -168,11 +195,40 @@ skipped during the automated build** and are run by hand against a real DCS inst
 before a release goes out. Everything else — the installer, the voice bridges, the
 manager window — is covered automatically on every build.
 
+## Support the project
+
+ATCAI is free and open source, and built in spare time. If it added something to your
+flying, a donation is a genuine help — it pays for the DCS modules and terrains used to
+test against, and it buys the time to keep the project maintained as DCS updates break
+things.
+
+There's no obligation and nothing is held back: every feature works for everyone.
+
+**Bitcoin (BTC)**
+
+```
+bc1q0mp57a896yqcsvnnvrrnygelpg4yw6rs6wfcgj
+```
+
+**Ethereum (ETH)**
+
+```
+0x310965c1cecb8e79e9afba219a6b8c4b2887851f
+```
+
+Not in a position to donate? Starring the repository, reporting a bug clearly, or
+telling another DCS player about it all help just as much.
+
 ## What it doesn't do
 
 - Multiplayer. Voice commands would reach every aircraft.
 - Taxiway names — DCS doesn't expose them to scripts, so instructions stay general.
-- Per-airfield tower frequencies. ATC transmits on a fixed list rather than the real
-  frequency for the field you're at.
 - Understand free-form speech. It knows a fixed set of requests, though you can wrap
   anything around them.
+- Give each airfield its own ATIS frequency. DCS doesn't define one, so there's a single
+  ATIS channel carrying the nearest field's information.
+- Report visibility or cloud in the ATIS — the sim doesn't expose either to scripts.
+- Push-to-talk on anything but Windows.
+- Check that you're on the right frequency before accepting a request. ATC replies on the
+  field's real frequency, so you need to be tuned in to hear it — but it will answer a
+  request made on any frequency at all.

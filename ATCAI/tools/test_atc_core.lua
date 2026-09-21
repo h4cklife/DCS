@@ -48,6 +48,7 @@ local scenario = {
     airborne = false,
     airbaseDistance = 100,
     ammo = {},
+    missionTime = 50400,      -- 14:00
 }
 
 env = { info = function() end }
@@ -71,6 +72,7 @@ local fakeAirbase = {
 }
 
 world = { getAirbases = function() return { fakeAirbase } end }
+timer = { getAbsTime = function() return scenario.missionTime or 0 end }
 
 local fakeUnit = {
     getName = function() return "- Chevy 81 (Player)" end,
@@ -170,6 +172,86 @@ do
     check(ATCAI_INBOX_PATH and ATCAI_INBOX_PATH:find("inbox.lua", 1, true) ~= nil,
         "the derived inbox path points at inbox.lua",
         tostring(ATCAI_INBOX_PATH))
+end
+
+print("transmits on the field's own frequencies")
+do
+    -- What the manager generates from the terrain's Radio.lua.
+    ATCAI_FREQUENCIES = {
+        ["vaziani tower"] = {
+            { mhz = 4.700, modulation = "AM", band = "HF" },
+            { mhz = 269.000, modulation = "AM", band = "UHF" },
+        },
+        ["batumi"] = { { mhz = 260.000, modulation = "FM", band = "UHF" } },
+    }
+
+    local freqs, modes = ATC.fieldFrequencies(fakeAirbase)
+    eq(freqs, "4.700,269.000", "uses the frequencies this field actually broadcasts on")
+    eq(modes, "AM,AM", "with a modulation per frequency")
+
+    local byName = { getCallsign = function() return nil end,
+                     getName = function() return "Batumi" end }
+    freqs, modes = ATC.fieldFrequencies(byName)
+    eq(freqs, "260.000", "falls back to the airbase name when there's no callsign")
+    eq(modes, "FM", "keeps that field's modulation")
+
+    local unknown = { getCallsign = function() return "Nowhere" end,
+                      getName = function() return "Nowhere" end }
+    freqs = ATC.fieldFrequencies(unknown)
+    eq(freqs, ATC.TTS_FREQUENCY, "an unknown field falls back to the configured list")
+
+    ATCAI_FREQUENCIES = nil
+    freqs = ATC.fieldFrequencies(fakeAirbase)
+    eq(freqs, ATC.TTS_FREQUENCY, "no generated table at all still works")
+end
+
+print("ATIS")
+do
+    eq(ATC.informationLetter(0), "Alpha", "midnight is information Alpha")
+    eq(ATC.informationLetter(3600 * 3), "Delta", "the letter advances each hour")
+    eq(ATC.informationLetter(3600 * 25), "Zulu", "hour 25 is still Zulu, the last letter")
+    eq(ATC.informationLetter(3600 * 27), "Bravo", "past Zulu it wraps back round")
+    eq(ATC.informationLetter(3600 * 14), "Oscar", "14:00 is information Oscar")
+
+    eq(ATC.formatClock(50400), "1400", "14:00 reads as 1400")
+    eq(ATC.formatClock(0), "0000", "midnight reads as 0000")
+    eq(ATC.formatClock(3600 * 25), "0100", "past midnight wraps to the next day")
+
+    eq(ATC.formatTemperature(20.6), "temperature 21", "temperature rounds to whole degrees")
+    eq(ATC.formatTemperature(-4.2), "temperature minus 4", "below zero reads as minus")
+    eq(ATC.formatTemperature(nil), "temperature unavailable", "missing data degrades gracefully")
+
+    local conditions = {
+        runway = { name = "13" },
+        windText = "wind 074 at 6",
+        qnhText = "QNH 29.92",
+        celsius = 21,
+    }
+    local report = ATC.atisReport("Vaziani", conditions, 3600 * 3 + 1800)
+    contains(report, "Vaziani information Delta", "names the field and the letter")
+    contains(report, "time 0330", "gives the time")
+    contains(report, "runway 13 in use", "names the runway in use")
+    contains(report, "wind 074 at 6", "reports the wind")
+    contains(report, "temperature 21", "reports the temperature")
+    contains(report, "QNH 29.92", "reports the altimeter")
+    contains(report, "you have information Delta", "asks you to acknowledge the letter")
+end
+
+print("requesting ATIS")
+do
+    scenario.airborne = false
+    reset(ATC.PHASE.PARKED)
+    ATC.requestATIS(params)
+    contains(lastSpoken(), "information", "ATIS can be requested on the ground")
+
+    -- It's information, not a clearance, so it must work at any point in a sortie.
+    scenario.airborne = true
+    reset(ATC.PHASE.AIRBORNE)
+    ATC.requestATIS(params)
+    contains(lastSpoken(), "information", "and in the air")
+    eq(ATC.getState(fakeUnit:getName()).phase, ATC.PHASE.AIRBORNE,
+        "asking for information doesn't change your phase")
+    scenario.airborne = false
 end
 
 print("callsign cleanup")

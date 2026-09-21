@@ -166,10 +166,10 @@ end
 print("intent coverage")
 do
     local intents = ATC.inboxIntents()
-    eq(#intents, 8, "every ATC request is reachable by voice")
+    eq(#intents, 9, "every ATC request is reachable by voice")
     local seen = {}
     for _, name in ipairs(intents) do seen[name] = true end
-    for _, expected in ipairs({ "radio_check", "startup", "taxi", "takeoff",
+    for _, expected in ipairs({ "radio_check", "atis", "startup", "taxi", "takeoff",
                                 "inbound", "landing", "parking", "loadout" }) do
         check(seen[expected] == true, "intent '" .. expected .. "' is mapped")
     end

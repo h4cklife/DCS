@@ -28,6 +28,7 @@ ATC.INBOX_POLL_SECONDS = ATC.INBOX_POLL_SECONDS or 0.3
 -- nil handler captured at definition time.
 local INTENT_HANDLERS = {
     radio_check = "requestRadioCheck",
+    atis = "requestATIS",
     startup = "requestStartup",
     taxi = "requestTaxi",
     takeoff = "requestTakeoff",

@@ -1,6 +1,8 @@
 # ATCAI Manager — design plan
 
-**Status: proposal, not started. For review.**
+**Status: built and shipped in v1.0.0.** Kept as the record of what was decided and why,
+including the question that shaped the whole thing (can ATCAI load into every mission?)
+and the answer. Phases are marked done below.
 
 Goal: the user downloads one program, runs it, clicks Install, and ATCAI works. No
 copying Lua files, no command lines, no editing scripts to change a setting, no Mission

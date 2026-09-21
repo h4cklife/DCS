@@ -178,3 +178,137 @@ def test_log_messages_reach_the_pane(gui):
     gui._enqueue("test", "hello from the test")
     gui._drain()
     assert "hello from the test" in gui.log_view.get("1.0", "end")
+
+
+class TestPushToTalkControls:
+    """Configurable and off by default, because most people prefer open-mic."""
+
+    def test_off_by_default(self, gui):
+        assert gui.ptt_enabled.get() is False
+        assert "disabled" in str(gui.ptt_button.state()), \
+            "the key cannot be changed while push-to-talk is off"
+
+    def test_shows_the_current_key(self, gui):
+        assert "Ctrl" in gui.ptt_key_label.cget("text")
+
+    def test_enabling_lets_you_change_the_key(self, gui):
+        gui.ptt_enabled.set(True)
+        gui._refresh_ptt()
+        assert "disabled" not in str(gui.ptt_button.state())
+
+    def test_setting_is_remembered(self, gui, prefs_file):
+        import prefs
+        gui.ptt_enabled.set(True)
+        gui.ptt_key_code = 0xA3           # Right Ctrl
+        gui.ptt_key_name = "Control_R"
+        gui._remember()
+
+        saved = prefs.load(prefs_file)
+        assert saved["ptt_enabled"] is True
+        assert saved["ptt_key_code"] == 0xA3
+        assert saved["ptt_key_name"] == "Control_R"
+
+    def test_restored_on_restart(self, tk_root, prefs_file):
+        import app
+        import prefs
+        prefs.save({"ptt_enabled": True, "ptt_key_code": 0xA3,
+                    "ptt_key_name": "Control_R"}, prefs_file)
+
+        window = app.App(tk_root)
+        try:
+            assert window.ptt_enabled.get() is True
+            assert window.ptt_key_code == 0xA3
+            assert "Control_R" in window.ptt_key_label.cget("text")
+        finally:
+            window.destroy()
+
+    def test_passed_through_to_the_listener(self, gui, installed, monkeypatch):
+        """What the window shows must be what the recogniser actually uses."""
+        gui._use(installed)
+        gui.ptt_enabled.set(True)
+        gui.ptt_key_code = 0xA3
+        gui.ptt_key_name = "Control_R"
+
+        captured = {}
+        import atcai_listen
+        monkeypatch.setattr(atcai_listen, "run",
+                            lambda options, on_log=None, should_stop=None:
+                            captured.update(vars(options)))
+        gui._run_listener(None, lambda m: None, lambda: True)
+
+        assert captured["ptt_enabled"] is True
+        assert captured["ptt_key_code"] == 0xA3
+        assert captured["ptt_key_name"] == "Control_R"
+
+
+class TestAtisControls:
+    """The field must always show what is actually configured, typed or auto-picked."""
+
+    def test_defaults_to_the_recommended_frequency(self, gui):
+        assert gui.atis_enabled.get() is True
+        assert gui.atis_frequency.get() == "380.000"
+        assert gui.atis_auto.get() is False
+
+    def test_typing_is_allowed_until_auto_is_chosen(self, gui):
+        assert "disabled" not in str(gui.atis_entry.state())
+        gui.atis_auto.set(True)
+        gui._on_atis_changed()
+        assert "disabled" in str(gui.atis_entry.state()), \
+            "the field is read-only while the manager is choosing"
+
+    def test_auto_fills_the_field_with_its_choice(self, gui):
+        gui.atis_frequency.set("111.111")
+        gui.atis_auto.set(True)
+        gui._on_atis_auto_toggled()
+        # Whatever it picked, the field must show it rather than the stale value.
+        assert gui.atis_frequency.get() != "111.111"
+        assert 225.0 <= float(gui.atis_frequency.get()) <= 399.975
+
+    def test_warns_about_a_frequency_aircraft_cannot_tune(self, gui):
+        gui.atis_frequency.set("162.400")
+        gui._on_atis_changed()
+        assert "225-400" in gui.atis_note.cget("text")
+
+    def test_warns_about_a_frequency_an_airfield_uses(self, gui):
+        # Only meaningful with real terrain data available.
+        import frequencies as freq_reader
+        terrains = gui._terrain_frequencies()
+        if not terrains:
+            pytest.skip("no DCS terrain data available")
+        clash = next(f for f in freq_reader.used_frequencies(terrains) if 225 <= f <= 400)
+        gui.atis_frequency.set("%.3f" % clash)
+        gui._on_atis_changed()
+        assert "talk over" in gui.atis_note.cget("text")
+
+    def test_rejects_nonsense(self, gui):
+        gui.atis_frequency.set("banana")
+        gui._on_atis_changed()
+        assert "not a frequency" in gui.atis_note.cget("text")
+
+    def test_turning_it_off_says_so(self, gui):
+        gui.atis_enabled.set(False)
+        gui._on_atis_changed()
+        assert "only given when you ask" in gui.atis_note.cget("text")
+
+    def test_settings_reach_the_mission_config(self, gui, installed, quiet_dialogs):
+        import installer
+        gui._use(installed)
+        gui.atis_enabled.set(True)
+        gui.atis_frequency.set("377.500")
+        gui._save_settings()
+
+        saved = installer.read_config(installed)
+        assert saved["atis_enabled"] is True
+        assert saved["atis_frequency"] == "377.500"
+
+    def test_remembered_across_restarts(self, tk_root, prefs_file):
+        import app
+        import prefs
+        prefs.save({"atis_frequency": "355.000", "atis_auto_frequency": True}, prefs_file)
+
+        window = app.App(tk_root)
+        try:
+            assert window.atis_frequency.get() == "355.000"
+            assert window.atis_auto.get() is True
+        finally:
+            window.destroy()

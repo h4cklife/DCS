@@ -27,6 +27,7 @@ SCRIPT_FILES = (
     "atc_config.lua",
     "atc_core.lua",
     "atc_traffic.lua",
+    "atc_atis.lua",
     "atc_menu.lua",
     "atc_inbox.lua",
 )
@@ -56,6 +57,10 @@ CONFIG_FIELDS = {
     "traffic_final_range": (int, float),
     "traffic_final_height": (int, float),
     "traffic_final_arc": (int, float),
+    "atis_enabled": bool,
+    "atis_frequency": str,
+    "atis_modulation": str,
+    "atis_interval": (int, float),
 }
 
 
@@ -87,6 +92,10 @@ class Installation:
     @property
     def config_path(self) -> Path:
         return self.scripts_dir / "config.lua"
+
+    @property
+    def frequencies_path(self) -> Path:
+        return self.scripts_dir / "frequencies.lua"
 
 
 # ---------- locating DCS ----------
@@ -214,6 +223,94 @@ def _registry_saved_games() -> str | None:
     text = result.stdout.decode("cp1252", errors="replace")
     match = re.search(r"REG_(?:EXPAND_)?SZ\s+(.+)", text)
     return match.group(1).strip() if match else None
+
+
+# ---------- locating the DCS game install ----------
+#
+# Separate from the writeable directory above: frequencies come from the game's own
+# terrain files, which live in the install, not in Saved Games.
+
+DCS_STEAM_APP_ID = "223750"
+ED_REGISTRY_KEYS = (
+    r"HKCU\Software\Eagle Dynamics\DCS World",
+    r"HKCU\Software\Eagle Dynamics\DCS World OpenBeta",
+)
+
+
+def _steam_libraries() -> list[Path]:
+    """Every Steam library folder, read from Steam's own config."""
+    libraries: list[Path] = []
+    roots = [
+        windows_to_local(r"C:\Program Files (x86)\Steam"),
+        windows_to_local(r"C:\Program Files\Steam"),
+    ]
+    for root in roots:
+        for relative in ("steamapps/libraryfolders.vdf", "config/libraryfolders.vdf"):
+            config = Path(root) / relative
+            try:
+                text = config.read_text(encoding="utf-8", errors="replace")
+            except OSError:
+                continue
+            for match in re.finditer(r'"path"\s*"([^"]+)"', text):
+                library = Path(windows_to_local(match.group(1).replace("\\\\", "\\")))
+                if library.is_dir() and library not in libraries:
+                    libraries.append(library)
+    return libraries
+
+
+def _registry_dcs_installs() -> list[str]:
+    """Standalone DCS records its install path in the registry; Steam copies don't."""
+    found = []
+    for key in ED_REGISTRY_KEYS:
+        if not running_under_wsl():
+            try:
+                import winreg  # noqa: PLC0415 - Windows only
+                with winreg.OpenKey(winreg.HKEY_CURRENT_USER, key.split("\\", 1)[1]) as handle:
+                    value, _ = winreg.QueryValueEx(handle, "Path")
+                    found.append(value)
+            except (ImportError, OSError):
+                continue
+        else:
+            try:
+                result = subprocess.run(["reg.exe", "query", key, "/v", "Path"],
+                                        capture_output=True, timeout=15, **no_window())
+            except (OSError, subprocess.SubprocessError):
+                continue
+            match = re.search(r"REG_(?:EXPAND_)?SZ\s+(.+)",
+                              result.stdout.decode("cp1252", errors="replace"))
+            if match:
+                found.append(match.group(1).strip())
+    return found
+
+
+def is_dcs_install(path: Path) -> bool:
+    """A real DCS install has the terrain files we read frequencies from."""
+    return (Path(path) / "Mods" / "terrains").is_dir()
+
+
+def find_dcs_installs() -> list[Path]:
+    """Every DCS game install we can find. Empty means: ask the user."""
+    candidates: list[Path] = []
+
+    for raw in _registry_dcs_installs():
+        candidates.append(Path(windows_to_local(raw)))
+
+    for library in _steam_libraries():
+        candidates.append(library / "steamapps" / "common" / "DCSWorld")
+
+    for fallback in (r"C:\Program Files\Eagle Dynamics\DCS World",
+                     r"C:\Program Files\Eagle Dynamics\DCS World OpenBeta",
+                     r"C:\Program Files (x86)\Steam\steamapps\common\DCSWorld"):
+        candidates.append(Path(windows_to_local(fallback)))
+
+    found: list[Path] = []
+    for candidate in candidates:
+        try:
+            if is_dcs_install(candidate) and candidate not in found:
+                found.append(candidate)
+        except OSError:
+            continue
+    return found
 
 
 def inspect_path(path: Path, label: str | None = None) -> Installation:
@@ -366,10 +463,11 @@ def uninstall(installation: Installation, remove_config: bool = False) -> list[s
         installation.config_path.unlink()
         actions.append("removed config.lua")
 
-    inbox = installation.scripts_dir / "inbox.lua"
-    if inbox.is_file():
-        inbox.unlink()
-        actions.append("removed inbox.lua")
+    for generated in ("inbox.lua", "frequencies.lua"):
+        path = installation.scripts_dir / generated
+        if path.is_file():
+            path.unlink()
+            actions.append("removed %s" % generated)
 
     # Only tidy the folder away if nothing of the user's is left in it.
     if installation.scripts_dir.is_dir() and not any(installation.scripts_dir.iterdir()):
@@ -377,6 +475,29 @@ def uninstall(installation: Installation, remove_config: bool = False) -> list[s
         actions.append("removed the ATCAI folder")
 
     return actions
+
+
+def write_frequencies(installation: Installation, install_dir: Path | None) -> int:
+    """Generate the airfield frequency table from the game's own terrain files.
+
+    Returns how many airfields were found. Zero is not fatal: ATC falls back to the
+    frequency list in its settings.
+    """
+    import frequencies as freq_reader        # local import keeps installer standalone
+
+    if not install_dir or not is_dcs_install(Path(install_dir)):
+        return 0
+
+    terrains = freq_reader.read_terrains(Path(install_dir))
+    if not terrains:
+        return 0
+
+    installation.scripts_dir.mkdir(parents=True, exist_ok=True)
+    target = installation.frequencies_path
+    temp = target.with_suffix(".lua.tmp")
+    temp.write_text(freq_reader.render_lua(terrains), encoding="utf-8")
+    os.replace(temp, target)
+    return sum(len(fields) for fields in terrains.values())
 
 
 def set_enabled(installation: Installation, enabled: bool) -> list[str]:
@@ -418,6 +539,11 @@ def render_config(settings: dict) -> str:
         expected = CONFIG_FIELDS.get(key)
         if expected is None:
             raise ValueError("unknown setting: %s" % key)
+        if expected is bool:
+            if not isinstance(value, bool):
+                raise ValueError("%s must be true or false" % key)
+            lines.append("    %s = %s," % (key, "true" if value else "false"))
+            continue
         if not isinstance(value, expected) or isinstance(value, bool):
             raise ValueError("%s has the wrong type" % key)
         if isinstance(value, str):
@@ -453,12 +579,14 @@ def read_config(installation: Installation) -> dict:
 
     settings: dict = {}
     for key, expected in CONFIG_FIELDS.items():
-        match = re.search(r'\b%s\s*=\s*("([^"]*)"|[-\d.]+)' % re.escape(key), text)
+        match = re.search(r'\b%s\s*=\s*("([^"]*)"|true|false|[-\d.]+)' % re.escape(key), text)
         if not match:
             continue
+        raw = match.group(1)
         if match.group(2) is not None:
             settings[key] = match.group(2)
+        elif raw in ("true", "false"):
+            settings[key] = raw == "true"
         else:
-            raw = match.group(1)
             settings[key] = float(raw) if "." in raw else int(raw)
     return settings

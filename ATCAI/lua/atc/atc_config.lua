@@ -30,6 +30,10 @@ ATC.CONFIG_FIELDS = {
     traffic_final_range   = { "TRAFFIC_FINAL_RANGE", "number" },
     traffic_final_height  = { "TRAFFIC_FINAL_HEIGHT", "number" },
     traffic_final_arc     = { "TRAFFIC_FINAL_ARC", "number" },
+    atis_enabled          = { "ATIS_ENABLED", "boolean" },
+    atis_frequency        = { "ATIS_FREQUENCY", "string" },
+    atis_modulation       = { "ATIS_MODULATION", "string" },
+    atis_interval         = { "ATIS_INTERVAL", "number" },
 }
 
 -- Returns the number of settings applied, and a list of anything rejected.

@@ -1,6 +1,7 @@
 """Speech recognition phrases, intent matching, and the inbox the mission reads."""
 
 import subprocess
+import time
 
 import pytest
 
@@ -178,3 +179,42 @@ class TestLogParsing:
     ])
     def test_ignores_everything_else(self, line):
         assert tts.LINE_RE.search(line) is None
+
+
+class TestPushToTalk:
+    """Off by default: ATC listens continuously unless the user opts in."""
+
+    def test_disabled_always_counts_as_talking(self):
+        ptt = listen.PushToTalk(enabled=False)
+        assert ptt.was_talking() is True
+
+    def test_disabled_starts_no_watcher(self):
+        ptt = listen.PushToTalk(enabled=False)
+        ptt.start()
+        assert ptt._thread is None
+
+    def test_default_options_leave_it_off(self):
+        assert listen.build_options().ptt_enabled is False
+
+    def test_enabled_requires_the_key_to_have_been_held(self, monkeypatch):
+        monkeypatch.setattr("os.name", "nt")
+        ptt = listen.PushToTalk(enabled=True, key_code=0x11)
+        assert ptt.enabled is True
+        assert ptt.was_talking() is False, "nothing held yet, so nothing should pass"
+
+        # Recognition lands after you release the key, so a recent press must still count.
+        ptt.last_down = time.time()
+        assert ptt.was_talking() is True
+
+        ptt.last_down = time.time() - (listen.PTT_GRACE_SECONDS + 1)
+        assert ptt.was_talking() is False, "a long-past press must not keep letting speech through"
+
+    def test_cannot_be_enabled_off_windows(self, monkeypatch):
+        # GetAsyncKeyState is Windows-only; elsewhere it degrades to listening always.
+        monkeypatch.setattr("os.name", "posix")
+        ptt = listen.PushToTalk(enabled=True)
+        assert ptt.enabled is False
+        assert ptt.was_talking() is True
+
+    def test_a_bad_key_code_falls_back_to_ctrl(self):
+        assert listen.PushToTalk(enabled=False, key_code=0).key_code == 0x11
