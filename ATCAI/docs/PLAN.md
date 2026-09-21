@@ -1,7 +1,7 @@
 # ATCAI — architecture and decisions
 
 How ATCAI is built and why it's built that way. Written after the fact: everything here
-describes what exists and ships in v1.1.0, not what is planned.
+describes what exists and ships in v1.2.0, not what is planned.
 
 For the feature-by-feature state of the project see the status table in
 [README.md](../README.md). For the manager app specifically see
@@ -139,6 +139,54 @@ counts within a short grace period.
 functions the comms menu does, so the menu keeps working and voice was additive rather
 than a rewrite.
 
+**An emergency is a flag on the aircraft's state, not a separate mode.** Declaring sets
+`state.emergency`, and the existing request handlers consult it: landing skips the
+traffic check entirely rather than being handed a softer one, and parking clears the
+flag. Keeping it as state rather than a parallel set of handlers means an emergency
+arrival still goes through the same clearance path as any other, so the two can't drift
+apart.
+
+**Distress calls bypass the range limit, and only they do.** `begin()` normally refuses a
+request made outside ATC range, which is right for asking to taxi and wrong for a mayday.
+Rather than lifting the limit, the emergency and vectors calls pass `anyDistance` and
+fall back to the nearest field the player's coalition can use. Every other request keeps
+the limit, and a test asserts that it does - the easy mistake here is relaxing the rule
+for everyone while fixing it for one caller.
+
+**A mayday outranks whatever else was said.** Voice matching normally takes the longest
+phrase, which quietly resolved "mayday mayday, Chevy 81, request landing" to a routine
+landing request - the calm half of a distress call winning because it happened to be
+longer. `PRIORITY_INTENTS` returns the emergency regardless of length. This was found by
+a test written to assert the intended behaviour, not by flying.
+
+**A few replies transmit wide; most don't.** ATC normally answers on the field's own
+frequency, which is the point of reading real frequencies out of the terrain. But the
+calls that matter when you're away from a field - a refusal, a loadout check, an
+emergency, a divert - were going out on the fallback list alone, and the fallback list
+shares no frequency with any real field (Vaziani is on 269.0; the fallback list starts at
+276.375). The result was a reply visible on screen and silent on the radio. Those calls
+now transmit on the union of the field's frequencies and the fallback list.
+`wideFrequencies` de-duplicates because SRS pairs the frequency and modulation lists by
+position, so a repeat would shift them out of step.
+
+This was invisible to the tests because they only ever asserted on the on-screen text,
+which is written unconditionally. The suite now captures the `ATCAI_TTS` lines as well
+and asserts which frequencies each reply actually goes out on - including that routine
+clearances *stay* narrow, since making everything wide would quietly undo the
+real-frequency feature.
+
+**Diverts are coalition-filtered; ordinary clearances are not.** `findDivertField` skips
+fields the player's side can't use, because sending a damaged aircraft to an enemy runway
+is worse than sending it further. `findNearestAirbase`, which every routine request uses,
+still answers from whichever field is closest - so in a combat mission an enemy tower will
+clear you to land. That is a real gap rather than a decision, left alone here because
+changing it alters the behaviour of every existing request and deserves its own change.
+
+**A field that won't report its coalition is offered anyway.** `usableByCoalition`
+defaults to true when `getCoalition` is missing or errors. Guessing wrong in that
+direction offers a runway that might be hostile; guessing the other way withholds one
+from a pilot who needs it.
+
 ## Still open
 
 - **One ATIS channel, not one per field.** DCS's terrain data gives airfields only
@@ -157,10 +205,44 @@ than a rewrite.
   at all. Recognition happens in an external Windows process that has no access to the
   aircraft's radio, so a request is accepted on any frequency, or with the radio off.
   Push-to-talk gates the microphone, not the radio, which is why holding the key works
-  regardless of what the radio is set to. Closing this would mean reading the player's
-  tuned frequency on the mission side and refusing requests that don't match the field -
-  cheap to do, but it makes the module punish a mis-set radio, so it should be a setting
-  rather than the default.
+  regardless of what the radio is set to.
+
+  **An earlier version of this note called closing the gap "cheap to do". That was
+  wrong.** The mission scripting API does not expose the player's tuned frequency at all.
+  `Unit` gives position, fuel, ammo and so on, but nothing about radio state, so there is
+  no mission-side value to compare the field's frequency against. The only way to read it
+  is DCS's **Export** layer - the same route SimpleRadio Standalone takes - which reaches
+  into the cockpit device itself via `GetDevice()`.
+
+  That makes it expensive for three reasons:
+
+  1. **It is per aircraft module.** Every cockpit exposes its radios differently, with
+     its own device ids and argument layout. SRS carries a separate integration per
+     airframe, which is why its aircraft support is a list rather than a guarantee. ATCAI
+     would need the same, and would work only for airframes someone had written up.
+  2. **It is a new integration surface.** ATCAI currently touches no Export API
+     whatsoever - the whole design runs on mission scripting plus a Hook. Adding an
+     `Export.lua` path means a third execution context, its own install step, and its own
+     conflict risk with other exporters the player already runs (SRS itself, TacView,
+     streaming overlays), all of which chain through the same file.
+  3. **The payoff is a refusal.** Success means ATC saying nothing when the radio is
+     mis-set. That is more realistic, but it removes the ability to diagnose a problem by
+     talking to ATC, which is exactly how ATCAI gets debugged.
+
+  So if this is ever built it belongs behind an off-by-default "realistic radio" setting,
+  scoped to whichever airframes are actually verified, and it should not be mistaken for
+  a small job. The cheap approximation, if the realism matters more than the accuracy, is
+  to gate on *something the sim does expose* - that the aircraft is powered and the
+  player is in a cockpit rather than external view - which catches the "radio off" case
+  without touching Export at all.
+- **Ordinary clearances ignore coalition.** See the divert note above: routine requests
+  answer from the nearest field regardless of whose it is. Fixing it means deciding what
+  an enemy tower should do - stay silent, or refuse - and it changes every request, not
+  just the new ones.
+- **Bearings are true, not magnetic.** The scripting API exposes no magnetic variation,
+  so headings given with vectors and emergency clearances are true bearings, while runway
+  designators come from DCS already magnetic. On terrains with significant declination
+  the two disagree by several degrees.
 - **Taxiways and circuit direction.** DCS doesn't expose taxiway layouts, so instructions
   stay general and circuit joins don't specify left or right.
 - **Multiplayer.** Voice commands are delivered to every registered player aircraft,

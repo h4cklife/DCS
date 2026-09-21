@@ -4,7 +4,7 @@
 [![Latest release](https://img.shields.io/github/v/release/h4cklife/DCS?filter=atcai-v*&label=release)](https://github.com/h4cklife/DCS/releases)
 [![Downloads](https://img.shields.io/github/downloads/h4cklife/DCS/total?label=downloads)](https://github.com/h4cklife/DCS/releases)
 [![Licence](https://img.shields.io/github/license/h4cklife/DCS)](../LICENSE)
-[![Tests](https://img.shields.io/badge/tests-224-brightgreen)](#tests)
+[![Tests](https://img.shields.io/badge/tests-243-brightgreen)](#tests)
 ![Platform](https://img.shields.io/badge/platform-Windows-0078d4?logo=windows)
 ![DCS World](https://img.shields.io/badge/DCS%20World-single--player-2ea44f)
 ![Python](https://img.shields.io/badge/python-3.12%2B-3776ab?logo=python&logoColor=white)
@@ -45,6 +45,7 @@ and roadmap.
 | 12 | Real radio — per-airfield frequencies, ATIS on request and on a loop | **Done** — verified in-game, frequencies and the ATIS loop both |
 | 13 | Push-to-talk, configurable in the manager | **Done** — verified in-game; off by default, key chosen in the app |
 | 14 | Verify traffic awareness in flight | **Done** — flown against `--traffic` AI using the player's field |
+| 15 | Emergency and divert handling — mayday, vectors home, straight-in | **Done** — verified in-game |
 
 ATCAI loads into **every mission you fly** — stock missions, Instant Action, campaigns —
 with no mission editing at all. See Install.
@@ -73,11 +74,38 @@ it pick an unused frequency for you.
   occupied, or sequencing behind traffic ahead of you.
 - **Request taxi to parking** — after landing, vacate and taxi in.
 - **Request loadout status** — reads back your current weapon/store loadout.
+- **Request straight-in approach** — skip the circuit when flying a full pattern isn't
+  realistic. Traffic ahead delays you rather than refusing the approach.
+- **Request vectors to nearest field** — the nearest field *your coalition can use*, with
+  a heading and distance to it. Answered at any range, because being out of ATC range is
+  the situation the call exists for.
+- **Declare emergency** — or just say "mayday". See below.
+
+**Declaring an emergency changes how ATC treats you.** Once declared, and until you're
+parked:
+
+- You're cleared to land immediately, without asking, with runway, wind and altimeter.
+- You are never sequenced behind other traffic and never sent around — the aircraft in
+  your way is the one that gets moved.
+- The call is answered from outside normal ATC range, unlike every other request. A field
+  200 miles away still takes a mayday and gives you a heading to reach it.
+- On the ground you're told to shut down where you are rather than given a clearance.
+- Taxiing to parking ends it, and the reply says so.
+
+Spoken distress calls outrank anything else in the same transmission: "mayday mayday,
+Chevy 81, request landing" is heard as a mayday, not as a request for landing.
 
 **ATC uses each airfield's real frequencies.** The manager reads them from the game's
 own terrain files at install time, so Batumi answers on Batumi's frequencies and Vaziani
 on Vaziani's — the same numbers DCS's built-in ATC menu shows. Tune to one of them and
 you hear ATC; don't, and you won't, which is how a radio should behave.
+
+**Some replies deliberately ignore that.** A refusal, your loadout, and anything said
+during an emergency or a divert go out on the field's frequencies *and* the configured
+fallback list at the same time. Those are the calls that matter when you're away from a
+field, so transmitting them on one field's frequency is self-defeating — you'd be least
+likely to be tuned to it. Routine clearances stay on the field's own frequency, so
+tuning in still means something.
 
 This applies to **what you hear, not to what ATC hears.** Speech recognition runs in an
 external Windows process that has no access to your aircraft's radio state, so a spoken
@@ -438,6 +466,11 @@ One pytest run covers everything:
   back.
 - **Python** — installer (detection, install/enable/remove, settings), preferences, and
   the voice bridges (phrase coverage, intent matching, inbox format, SRS failure modes).
+- **Wiring** (`tests/test_wiring.py`) — cross-checks the four files a request has to be
+  listed in: the handler in `atc_core.lua`, the comms-menu entry in `atc_menu.lua`, the
+  intent map in `atc_inbox.lua` and the spoken phrases in `atcai_listen.py`. DCS says
+  nothing when these drift — a menu entry naming a function that doesn't exist is just a
+  dead line in the comms menu — so nothing else would notice.
 - **GUI** (marked `gui`) — the manager window built and driven for real.
 
 Set `DCS_BIN` if your DCS install isn't at the default Steam path.
@@ -488,6 +521,16 @@ change.
 
 - Airbase detection is proximity-only — no concept of which parking spot you're in, and
   no disambiguation if two fields are both in range.
+- **Clearances aren't coalition-checked.** Diverts and vectors are — they only ever offer
+  a field your side can use — but ordinary requests answer from whichever field is
+  nearest, including an enemy one. In a combat mission you can be cleared to land at a
+  field you'd be shot down over.
+- A wide transmission covers the answering field plus the fallback list. If you're
+  tuned to some *third* field's frequency it still won't reach you — keep one of the
+  fallback frequencies on a second radio if you want a guarantee.
+- Bearings given with vectors and emergency clearances are **true, not magnetic**. DCS
+  exposes no magnetic variation to scripts. Runway designators come from DCS already
+  magnetic, so the two don't match on maps with significant declination.
 - Traffic awareness is inferred, not measured: DCS doesn't expose runway geometry to
   scripts, so "on the runway" means *on the ground, near the field, moving faster than
   taxi speed*, and "on final" means *low, close, and tracking the landing heading*. An

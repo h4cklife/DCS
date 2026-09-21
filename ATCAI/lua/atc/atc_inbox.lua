@@ -36,6 +36,9 @@ local INTENT_HANDLERS = {
     landing = "requestLanding",
     parking = "requestParking",
     loadout = "requestLoadout",
+    emergency = "declareEmergency",
+    vectors = "requestVectors",
+    straight_in = "requestStraightIn",
 }
 
 function ATC.inboxIntents()

@@ -71,9 +71,13 @@ Speak like you would on a real radio:
 > *"Reporting inbound"*
 > *"Requesting landing"*
 > *"Request loadout"*
+> *"Request straight in"*
+> *"Request vectors home"*
+> *"Mayday mayday, Chevy 81, engine fire"*
 
 Your callsign, the tower's name and a runway can all be in there — ATCAI picks the
-request out of whatever you say. "Request" and "requesting" both work everywhere.
+request out of whatever you say. "Request" and "requesting" both work everywhere, and so
+do "declare" and "declaring".
 
 The **Voice** tab shows everything it heard, so if something isn't being picked up you
 can see why.
@@ -100,7 +104,36 @@ speakers option — that always works.
 | Inbound | A circuit join, your distance from the field, wind and altimeter |
 | Landing | Clearance — or a go-around, or sequencing behind other traffic |
 | Taxi to parking | Sent to vacate and taxi in after landing |
-| Loadout | Your remaining weapons read back |
+| Loadout | Your remaining weapons read back, from any distance |
+| Straight-in approach | Permission to skip the circuit and come straight in |
+| Vectors | A heading and distance to the nearest field your side can use |
+| Emergency | Priority, an immediate landing clearance, and the fire trucks out |
+
+### When it goes wrong
+
+Say **"mayday"** — that's all it takes. You don't have to be near a field, and you don't
+have to finish the sentence tidily; a mayday is heard even if you ask for something else
+in the same breath.
+
+Once you've declared, ATC treats you differently until you park:
+
+- You're cleared to land straight away, with the runway, wind and altimeter, without
+  having to ask.
+- You're never told to go around and never put behind other traffic. Whoever's in the
+  way gets moved instead.
+- It answers from any distance. Every other request needs you within about 50 miles;
+  a mayday doesn't.
+- It's transmitted on the field's frequency **and** the standard ATCAI frequencies at
+  once, so you hear it whichever of those you're tuned to. The same goes for your
+  loadout check and for anything ATC refuses — those are exactly the calls you'd
+  otherwise miss.
+
+If you're lost or your home field is gone, ask for **vectors** — "request vectors home".
+You'll get the nearest field your own side can use, with a heading and how far it is.
+Enemy fields are never offered.
+
+Both are in the comms menu too, at the bottom of the ATCAI list, if you'd rather not
+rely on being understood while things are going badly.
 
 ATC also refuses things that don't make sense: no takeoff clearance from your parking
 spot, no landing clearance while you're sitting on the ramp.

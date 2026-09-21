@@ -1,5 +1,44 @@
 # Changelog
 
+## 1.2.0 - 2026-09-21
+
+### For players
+
+- **Declare an emergency** — say "mayday", or use the comms menu. ATC clears you to land
+  immediately without being asked, stops sequencing you behind other traffic, never sends
+  you around, and answers from any distance rather than the usual 50-mile ATC range. It
+  ends when you taxi to parking. A mayday is heard even when there's another request in
+  the same transmission.
+- **Request vectors** — a heading and distance to the nearest field your coalition can
+  actually use. Enemy fields are never offered, and a closer hostile field is skipped in
+  favour of a friendly one further away.
+- **Request a straight-in approach** — skip the circuit. Traffic ahead delays it rather
+  than refusing it.
+
+### Fixed
+
+- **Replies you couldn't hear.** Anything answered away from a field went out on the
+  fallback frequency list only, which shares no frequency with the field you were
+  actually tuned to - so a refusal, a loadout check or an emergency call appeared as
+  on-screen text with nothing over the radio. Those replies now transmit on the field's
+  frequencies *and* the fallback list at once. Routine clearances are unchanged and stay
+  on the field's own frequency.
+- **Loadout is no longer refused for being out of range.** It reports your own aircraft's
+  stores, so it never needed a control tower in the first place.
+- Refusals are now transmitted as well as shown on screen. "No ATC in range" that you
+  couldn't hear was indistinguishable from the module being broken.
+
+### Verified in flight
+
+Emergencies, vectors and the straight-in approach have all been flown, as has the fix
+that made those replies audible.
+
+### Known limitations
+
+- Ordinary clearances still aren't coalition-checked: only diverts and vectors are, so a
+  routine request can be answered by whichever field is nearest, enemy included.
+- Bearings are true, not magnetic — DCS exposes no magnetic variation to scripts.
+
 ## 1.1.0 - 2026-09-20
 
 ### For players

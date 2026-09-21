@@ -27,7 +27,7 @@ import prefs  # noqa: E402
 import atcai_listen  # noqa: E402
 import atcai_tts  # noqa: E402
 
-VERSION = "1.1.0"
+VERSION = "1.2.0"
 PAD = 8
 
 

@@ -38,9 +38,14 @@ local function buildMenuForUnit(unit)
         missionCommands.addCommandForGroup(groupId, "Request taxi", root, ATC.requestTaxi, params)
         missionCommands.addCommandForGroup(groupId, "Request takeoff", root, ATC.requestTakeoff, params)
         missionCommands.addCommandForGroup(groupId, "Report inbound", root, ATC.requestInbound, params)
+        missionCommands.addCommandForGroup(groupId, "Request straight-in approach", root, ATC.requestStraightIn, params)
         missionCommands.addCommandForGroup(groupId, "Request landing", root, ATC.requestLanding, params)
         missionCommands.addCommandForGroup(groupId, "Request taxi to parking", root, ATC.requestParking, params)
         missionCommands.addCommandForGroup(groupId, "Request loadout status", root, ATC.requestLoadout, params)
+        -- Last because the menu is the slow way to declare one; saying "mayday" is the
+        -- fast way, and that's the point of having voice at all.
+        missionCommands.addCommandForGroup(groupId, "Request vectors to nearest field", root, ATC.requestVectors, params)
+        missionCommands.addCommandForGroup(groupId, "Declare emergency", root, ATC.declareEmergency, params)
 
         env.info("ATCAI: menu built for group " .. tostring(groupId) ..
             " (" .. tostring(unit:getName()) .. ")")

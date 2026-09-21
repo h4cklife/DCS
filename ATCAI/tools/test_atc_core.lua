@@ -49,9 +49,23 @@ local scenario = {
     airbaseDistance = 100,
     ammo = {},
     missionTime = 50400,      -- 14:00
+    unitSide = 2,             -- BLUE
+    airbaseSide = 2,
+    otherSide = 2,
+    otherDistance = 40000,
 }
 
-env = { info = function() end }
+-- What actually goes over the radio: "ATCAI_TTS|<freqs>|<modulations>|<text>".
+-- Checking only the on-screen text let a reply ship that was visible and inaudible.
+-- Declared before the stub that appends to it: a local declared later would leave the
+-- closure reading a nil global instead.
+local transmissions = {}
+
+env = { info = function(message)
+    if tostring(message):find("ATCAI_TTS|", 1, true) then
+        table.insert(transmissions, message)
+    end
+end }
 
 trigger = {
     action = {
@@ -64,14 +78,26 @@ atmosphere = {
     getTemperatureAndPressure = function() return 288, scenario.pressure end,
 }
 
+coalition = { side = { NEUTRAL = 0, RED = 1, BLUE = 2 } }
+
 local fakeAirbase = {
     getPoint = function() return { x = scenario.airbaseDistance, y = 0, z = 0 } end,
     getName = function() return "Vaziani" end,
     getCallsign = function() return "Vaziani Tower" end,
     getRunways = function() return scenario.runways end,
+    getCoalition = function() return scenario.airbaseSide end,
 }
 
-world = { getAirbases = function() return { fakeAirbase } end }
+-- A second field, used by the divert tests. Placed east so the bearing to it is 090.
+local otherAirbase = {
+    getPoint = function() return { x = 0, y = 0, z = scenario.otherDistance or 40000 } end,
+    getName = function() return "Kobuleti" end,
+    getCallsign = function() return "Kobuleti Tower" end,
+    getRunways = function() return scenario.runways end,
+    getCoalition = function() return scenario.otherSide end,
+}
+
+world = { getAirbases = function() return scenario.airbases or { fakeAirbase } end }
 timer = { getAbsTime = function() return scenario.missionTime or 0 end }
 
 local fakeUnit = {
@@ -80,6 +106,7 @@ local fakeUnit = {
     inAir = function() return scenario.airborne end,
     getAmmo = function() return scenario.ammo end,
     getGroup = function() return { getID = function() return 42 end } end,
+    getCoalition = function() return scenario.unitSide end,
 }
 
 local params = { groupId = 42, unit = fakeUnit }
@@ -88,8 +115,27 @@ local function lastSpoken()
     return spoken[#spoken]
 end
 
+local function lastTransmission()
+    return transmissions[#transmissions]
+end
+
+local function transmittedOn(frequency)
+    local line = lastTransmission()
+    if not line then
+        return false
+    end
+    local freqs = line:match("^ATCAI_TTS|([^|]*)|")
+    for value in tostring(freqs):gmatch("[^,]+") do
+        if tonumber(value) == tonumber(frequency) then
+            return true
+        end
+    end
+    return false
+end
+
 local function reset(phase)
     spoken = {}
+    transmissions = {}
     ATC.state = {}
     if phase then
         ATC.getState(fakeUnit:getName()).phase = phase
@@ -403,6 +449,330 @@ do
     scenario.ammo = { { count = 4, desc = { displayName = "AIM-120C" } } }
     ATC.requestLoadout(params)
     contains(lastSpoken(), "4 AIM-120C", "loadout lists counts and weapon names")
+end
+
+-- ---------- emergencies and diverts ----------
+
+print("bearings")
+do
+    local origin = { x = 0, y = 0, z = 0 }
+    near(ATC.bearingBetween(origin, { x = 100, z = 0 }), 0, 0.01, "north is 000")
+    near(ATC.bearingBetween(origin, { x = 0, z = 100 }), 90, 0.01, "east is 090")
+    near(ATC.bearingBetween(origin, { x = -100, z = 0 }), 180, 0.01, "south is 180")
+    near(ATC.bearingBetween(origin, { x = 0, z = -100 }), 270, 0.01, "west is 270")
+    eq(ATC.bearingBetween(origin, origin), nil, "no bearing to where you already are")
+    eq(ATC.bearingBetween(nil, origin), nil, "a missing point yields no bearing")
+
+    eq(ATC.headingText(5), "005", "headings are spoken as three digits")
+    eq(ATC.headingText(359.6), "000", "359.6 rounds to 360, which is spoken as 000")
+    eq(ATC.headingText(nil), "unknown", "a missing heading says so")
+end
+
+print("which fields a coalition may use")
+do
+    local friendly = { getCoalition = function() return 2 end }
+    local hostile = { getCoalition = function() return 1 end }
+    local neutral = { getCoalition = function() return 0 end }
+    local unknown = {}
+
+    eq(ATC.usableByCoalition(friendly, 2), true, "your own side's field is usable")
+    eq(ATC.usableByCoalition(neutral, 2), true, "a neutral field is usable")
+    eq(ATC.usableByCoalition(hostile, 2), false, "the enemy's field is not")
+    eq(ATC.usableByCoalition(unknown, 2), true,
+        "a field that won't say is offered anyway - withholding a runway is the worse error")
+    eq(ATC.usableByCoalition(friendly, nil), true, "an unknown own-side offers everything")
+end
+
+print("finding somewhere to divert")
+do
+    scenario.airbases = { fakeAirbase, otherAirbase }
+    scenario.airbaseDistance = 10000      -- Vaziani, north, closer
+    scenario.otherDistance = 40000        -- Kobuleti, east, further
+
+    scenario.airbaseSide, scenario.otherSide = 2, 2
+    local field, distance, bearing = ATC.findDivertField(fakeUnit)
+    eq(field and field:getName(), "Vaziani", "the nearest friendly field wins")
+    near(distance, 10000, 1, "and its distance is reported")
+    near(bearing, 0, 0.01, "with the bearing to it")
+
+    -- The point of the coalition filter: the closest runway may be the enemy's.
+    scenario.airbaseSide = 1
+    field, distance, bearing = ATC.findDivertField(fakeUnit)
+    eq(field and field:getName(), "Kobuleti", "a closer hostile field is skipped")
+    near(bearing, 90, 0.01, "bearing points at the field actually chosen")
+
+    scenario.airbaseSide, scenario.otherSide = 2, 2
+    scenario.airbases = nil
+    scenario.airbaseDistance = 100
+end
+
+print("declaring an emergency")
+do
+    scenario.airborne = true
+    reset(ATC.PHASE.AIRBORNE)
+    ATC.declareEmergency(params)
+
+    local said = lastSpoken()
+    contains(said, "roger your emergency", "the call is acknowledged as an emergency")
+    contains(said, "cleared to land", "and comes with a clearance, unasked")
+    contains(said, "emergency vehicles standing by", "with the fire trucks rolling")
+    eq(ATC.getState(fakeUnit:getName()).emergency, true, "the aircraft is flagged")
+    eq(ATC.getState(fakeUnit:getName()).phase, ATC.PHASE.INBOUND, "and put on approach")
+end
+
+print("an emergency is heard from outside normal ATC range")
+do
+    -- The situation the call exists for: too far out for anyone to be talking to you.
+    scenario.airborne = true
+    scenario.airbaseDistance = 400000      -- far beyond AIRBASE_AIR_RADIUS
+    reset(ATC.PHASE.AIRBORNE)
+    ATC.declareEmergency(params)
+
+    local said = lastSpoken()
+    check(said and not said:find("no ATC in range", 1, true),
+        "a distress call is not refused for being out of range", tostring(said))
+    contains(said, "roger your emergency", "a distant field still takes the call")
+    contains(said, "steer ", "and gives a heading to reach it")
+
+    -- A routine request at that range is still refused, as before.
+    reset(ATC.PHASE.AIRBORNE)
+    ATC.requestRadioCheck(params)
+    contains(lastSpoken(), "no ATC in range", "ordinary calls keep the range limit")
+    scenario.airbaseDistance = 100
+end
+
+print("declaring on the ground")
+do
+    scenario.airborne = false
+    reset(ATC.PHASE.PARKED)
+    ATC.declareEmergency(params)
+
+    local said = lastSpoken()
+    contains(said, "shut down", "on the ground you are told to stop, not to land")
+    check(said and not said:find("cleared to land", 1, true),
+        "no landing clearance for an aircraft already down", tostring(said))
+end
+
+print("vectors to the nearest friendly field")
+do
+    scenario.airborne = true
+    scenario.airbases = { fakeAirbase, otherAirbase }
+    scenario.airbaseSide = 1              -- nearest field is hostile
+    reset(ATC.PHASE.AIRBORNE)
+    ATC.requestVectors(params)
+
+    local said = lastSpoken()
+    contains(said, "Kobuleti", "names the field you can actually use")
+    contains(said, "steer 090", "gives a heading to it")
+    contains(said, "miles", "and how far it is")
+    check(said and not said:find("is Vaziani", 1, true),
+        "the hostile field is never offered as the divert", tostring(said))
+
+    scenario.airbaseSide = 2
+    scenario.airbases = nil
+
+    scenario.airborne = false
+    reset(ATC.PHASE.PARKED)
+    ATC.requestVectors(params)
+    contains(lastSpoken(), "still on the ground", "vectors are refused on the ground")
+end
+
+print("an emergency outranks the traffic pattern")
+do
+    -- Stand in for atc_traffic.lua: someone is on short final ahead of us.
+    ATC.runwayConflict = function()
+        return { kind = "final", typeName = "Su-25T", distance = 5000 }
+    end
+
+    scenario.airborne = true
+    reset(ATC.PHASE.INBOUND)
+    ATC.requestLanding(params)
+    contains(lastSpoken(), "number two", "normally you are sequenced behind them")
+
+    reset(ATC.PHASE.INBOUND)
+    ATC.getState(fakeUnit:getName()).emergency = true
+    ATC.requestLanding(params)
+    local said = lastSpoken()
+    contains(said, "cleared to land", "an emergency is cleared regardless")
+    contains(said, "you have priority", "and told so explicitly")
+    check(said and not said:find("number two", 1, true),
+        "an emergency is never sequenced behind anyone", tostring(said))
+
+    -- Even an occupied runway does not send an emergency around.
+    ATC.runwayConflict = function()
+        return { kind = "runway", typeName = "Su-25T", distance = 200 }
+    end
+    reset(ATC.PHASE.INBOUND)
+    ATC.requestLanding(params)
+    contains(lastSpoken(), "go around", "normal traffic is sent around")
+
+    reset(ATC.PHASE.INBOUND)
+    ATC.getState(fakeUnit:getName()).emergency = true
+    ATC.requestLanding(params)
+    local emergencySaid = lastSpoken()
+    check(emergencySaid and not emergencySaid:find("go around", 1, true),
+        "an emergency is never sent around", tostring(emergencySaid))
+
+    ATC.runwayConflict = nil
+end
+
+print("the emergency ends when you park")
+do
+    scenario.airborne = false
+    reset(ATC.PHASE.LANDING)
+    ATC.getState(fakeUnit:getName()).emergency = true
+    ATC.requestParking(params)
+
+    contains(lastSpoken(), "emergency services are meeting you", "the reply reflects it")
+    eq(ATC.getState(fakeUnit:getName()).emergency, false, "the flag is cleared")
+
+    -- A routine arrival still gets the routine reply.
+    reset(ATC.PHASE.LANDING)
+    ATC.requestParking(params)
+    local said = lastSpoken()
+    check(said and not said:find("emergency", 1, true),
+        "an ordinary landing is not met by fire trucks", tostring(said))
+end
+
+print("straight-in approach")
+do
+    scenario.airborne = true
+    reset(ATC.PHASE.AIRBORNE)
+    ATC.requestStraightIn(params)
+
+    local said = lastSpoken()
+    contains(said, "cleared straight-in", "the approach is approved")
+    contains(said, "runway 13", "and names the runway in use")
+    eq(ATC.getState(fakeUnit:getName()).phase, ATC.PHASE.INBOUND, "phase moves to inbound")
+    eq(ATC.getState(fakeUnit:getName()).straightIn, true, "and the request is remembered")
+
+    -- Traffic delays a straight-in rather than refusing it outright.
+    ATC.runwayConflict = function()
+        return { kind = "final", typeName = "Su-25T", distance = 5000 }
+    end
+    reset(ATC.PHASE.AIRBORNE)
+    ATC.requestStraightIn(params)
+    contains(lastSpoken(), "expect delay", "traffic is mentioned, not used as a refusal")
+    ATC.runwayConflict = nil
+
+    scenario.airborne = false
+    reset(ATC.PHASE.PARKED)
+    ATC.requestStraightIn(params)
+    contains(lastSpoken(), "still on the ground", "refused before takeoff")
+end
+
+-- ---------- what gets transmitted, not just what gets written on screen ----------
+
+print("replies you must not miss go out on every plausible frequency")
+do
+    -- The bug this guards: with ATCAI_FREQUENCIES loaded, an in-range reply goes out on
+    -- the field's own frequency (Vaziani 269.0) while anything falling back went out on
+    -- the default list, which shares no frequency with it. The text appeared on screen
+    -- and nothing came over the radio.
+    ATCAI_FREQUENCIES = {
+        ["vaziani tower"] = { { mhz = 269.0, modulation = "AM" } },
+        ["vaziani"] = { { mhz = 269.0, modulation = "AM" } },
+    }
+
+    local wide, modes = ATC.wideFrequencies(fakeAirbase)
+    check(wide:find("269", 1, true) ~= nil, "a wide call keeps the field's frequency", wide)
+    check(wide:find("251", 1, true) ~= nil, "and adds the fallback list", wide)
+
+    local freqCount, modeCount = 0, 0
+    for _ in wide:gmatch("[^,]+") do freqCount = freqCount + 1 end
+    for _ in modes:gmatch("[^,]+") do modeCount = modeCount + 1 end
+    eq(freqCount, modeCount, "every frequency has a modulation beside it")
+
+    -- SRS pairs the two lists by position, so a duplicate would shift them apart.
+    local twice = ATC.wideFrequencies(fakeAirbase)
+    local seen = {}
+    for value in twice:gmatch("[^,]+") do
+        check(not seen[value], "no frequency is listed twice: " .. value)
+        seen[value] = true
+    end
+end
+
+print("loadout is answered anywhere")
+do
+    scenario.airborne = true
+    scenario.airbaseDistance = 400000        -- far outside ATC range
+    scenario.ammo = { { count = 4, desc = { displayName = "AIM-120C" } } }
+    reset(ATC.PHASE.AIRBORNE)
+    ATC.requestLoadout(params)
+
+    local said = lastSpoken()
+    contains(said, "4 AIM-120C", "your own stores are reported however far out you are")
+    check(said and not said:find("no ATC in range", 1, true),
+        "counting your own pylons never needed a control tower", tostring(said))
+    check(transmittedOn(269.0), "goes out on the field frequency you may be tuned to",
+        tostring(lastTransmission()))
+    check(transmittedOn(251.0), "and on the fallback list as well",
+        tostring(lastTransmission()))
+
+    scenario.airbaseDistance = 100
+end
+
+print("an emergency is transmitted where you can hear it")
+do
+    scenario.airborne = true
+    scenario.airbaseDistance = 400000
+    reset(ATC.PHASE.AIRBORNE)
+    ATC.declareEmergency(params)
+
+    contains(lastSpoken(), "roger your emergency", "the call is answered")
+    check(transmittedOn(251.0),
+        "a distant field answers on the fallback list too, not only its own frequency",
+        tostring(lastTransmission()))
+    check(transmittedOn(269.0), "while keeping its own frequency in the list",
+        tostring(lastTransmission()))
+
+    reset(ATC.PHASE.AIRBORNE)
+    ATC.requestVectors(params)
+    check(transmittedOn(251.0), "vectors are audible the same way",
+        tostring(lastTransmission()))
+
+    scenario.airbaseDistance = 100
+end
+
+print("refusals are audible")
+do
+    -- "No ATC in range" that you cannot hear reads as the module being broken.
+    scenario.airborne = false
+    scenario.airbaseDistance = 400000
+    reset(ATC.PHASE.PARKED)
+    ATC.requestRadioCheck(params)
+
+    contains(lastSpoken(), "no ATC in range", "the refusal is still given")
+    check(transmittedOn(251.0), "and it is actually transmitted",
+        tostring(lastTransmission()))
+    check(transmittedOn(269.0),
+        "including the nearest field's frequency, the likeliest one you're tuned to",
+        tostring(lastTransmission()))
+
+    scenario.airbaseDistance = 100
+    scenario.airborne = true
+    reset(ATC.PHASE.PARKED)
+    ATC.requestParking(params)
+    contains(lastSpoken(), "unable", "a phase refusal is spoken")
+    check(transmittedOn(251.0), "and transmitted wide as well",
+        tostring(lastTransmission()))
+end
+
+print("routine clearances stay on the field frequency")
+do
+    -- Wide transmission is for the exceptions. If everything went out on every
+    -- frequency, the real-frequency feature would mean nothing.
+    scenario.airborne = false
+    reset(ATC.PHASE.PARKED)
+    ATC.requestStartup(params)
+
+    check(transmittedOn(269.0), "startup is on the field's frequency",
+        tostring(lastTransmission()))
+    check(not transmittedOn(251.0),
+        "and not on the fallback list - tuning in still has to matter",
+        tostring(lastTransmission()))
+
+    ATCAI_FREQUENCIES = nil
 end
 
 -- ---------- summary ----------

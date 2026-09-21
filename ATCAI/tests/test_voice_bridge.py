@@ -59,9 +59,29 @@ class TestIntentMatching:
         ("Chevy 81 report inbound", "inbound"),
         ("Tower Chevy 81 on final runway 13", "landing"),
         ("Chevy 81 requesting weapons status", "loadout"),
+        # Distress calls, as they are actually spoken.
+        ("mayday mayday Chevy 81 engine fire", "emergency"),
+        ("Chevy 81 declaring an emergency", "emergency"),
+        ("Chevy 81 declare emergency", "emergency"),
+        ("Tower Chevy 81 pan pan low on fuel", "emergency"),
+        ("Chevy 81 requesting emergency landing", "emergency"),
+        ("Chevy 81 request vectors home", "vectors"),
+        ("Chevy 81 requesting vectors to nearest field", "vectors"),
+        ("Chevy 81 request divert", "vectors"),
+        ("Chevy 81 requesting straight in approach", "straight_in"),
+        ("Chevy 81 request straight in", "straight_in"),
     ])
     def test_finds_the_request_inside_a_transmission(self, lookup, spoken, expected):
         assert listen.match_intent(spoken, lookup) == expected
+
+    def test_a_distress_call_beats_the_request_beside_it(self, lookup):
+        """Someone declaring while asking for something else is declaring."""
+        assert listen.match_intent(
+            "mayday mayday Chevy 81 request landing", lookup) == "emergency"
+
+    def test_declaring_is_expanded_like_the_other_verbs(self):
+        expanded = listen.expand_phrases(["declare emergency"])
+        assert "declaring emergency" in expanded
 
     @pytest.mark.parametrize("spoken", [
         "nice weather today",

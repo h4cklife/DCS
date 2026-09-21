@@ -187,6 +187,30 @@ function ATC.formatTemperature(celsius)
     return string.format("temperature %d", rounded)
 end
 
+-- Bearing FROM one point TO another. x is north, z is east, same as the wind vector.
+-- This is a TRUE bearing: the scripting API exposes no magnetic variation, so on a map
+-- with significant declination it will differ from what the aircraft's compass reads.
+-- Runway designators come from DCS already magnetic, so the two are not interchangeable.
+function ATC.bearingBetween(from, to)
+    if not from or not to then
+        return nil
+    end
+    local dx = (to.x or 0) - (from.x or 0)
+    local dz = (to.z or 0) - (from.z or 0)
+    if dx == 0 and dz == 0 then
+        return nil
+    end
+    return normalizeHeading(math.deg(math.atan2(dz, dx)))
+end
+
+function ATC.headingText(degrees)
+    if not degrees then
+        return "unknown"
+    end
+    -- Round first, then wrap: 359.6 is heading 360, which is spoken as 000, not "360".
+    return string.format("%03d", math.floor(normalizeHeading(degrees) + 0.5) % 360)
+end
+
 function ATC.distanceText(metres)
     if not metres then
         return "position unknown"
@@ -233,16 +257,26 @@ local function get2DDistance(p1, p2)
     return math.sqrt(dx * dx + dz * dz)
 end
 
-function ATC.findNearestAirbase(unit)
+-- Nearest airbase at any distance, optionally restricted by a filter. Separated out
+-- because a pilot in trouble needs an answer from beyond normal ATC range, where
+-- findNearestAirbase deliberately refuses.
+local function scanAirbases(unit, accept)
     local unitPos = unit:getPoint()
     local nearest, nearestDist = nil, math.huge
 
     for _, airbase in pairs(world.getAirbases()) do
-        local dist = get2DDistance(unitPos, airbase:getPoint())
-        if dist < nearestDist then
-            nearest, nearestDist = airbase, dist
+        if not accept or accept(airbase) then
+            local dist = get2DDistance(unitPos, airbase:getPoint())
+            if dist < nearestDist then
+                nearest, nearestDist = airbase, dist
+            end
         end
     end
+    return nearest, nearestDist
+end
+
+function ATC.findNearestAirbase(unit)
+    local nearest, nearestDist = scanAirbases(unit)
 
     local limit = ATC.AIRBASE_SEARCH_RADIUS
     if unit.inAir and unit:inAir() then
@@ -254,6 +288,38 @@ function ATC.findNearestAirbase(unit)
     end
     -- Hand back the distance even on a miss, so the refusal can say how far out you are.
     return nil, nearestDist
+end
+
+-- Somewhere the player could actually put down: their own coalition's, or neutral.
+-- A field whose coalition can't be read is offered anyway - guessing wrong here means
+-- withholding a runway from someone who needs one, which is the worse failure.
+function ATC.usableByCoalition(airbase, side)
+    if not side or not airbase or type(airbase.getCoalition) ~= "function" then
+        return true
+    end
+    local ok, airbaseSide = pcall(airbase.getCoalition, airbase)
+    if not ok or airbaseSide == nil then
+        return true
+    end
+    local neutral = (coalition and coalition.side and coalition.side.NEUTRAL) or 0
+    return airbaseSide == side or airbaseSide == neutral
+end
+
+-- The field to divert to: nearest friendly one at any distance, with the bearing to it.
+function ATC.findDivertField(unit)
+    local side
+    if type(unit.getCoalition) == "function" then
+        local ok, value = pcall(unit.getCoalition, unit)
+        if ok then side = value end
+    end
+
+    local airbase, distance = scanAirbases(unit, function(candidate)
+        return ATC.usableByCoalition(candidate, side)
+    end)
+    if not airbase then
+        return nil
+    end
+    return airbase, distance, ATC.bearingBetween(unit:getPoint(), airbase:getPoint())
 end
 
 -- Wind, altimeter and the runway in use, as reported by the field.
@@ -320,30 +386,73 @@ function ATC.fieldFrequencies(airbase)
     return table.concat(freqs, ","), table.concat(modes, ",")
 end
 
-local function say(groupId, text, airbase)
+-- Some replies have to reach you wherever you are and whatever you're tuned to: a
+-- refusal, your own loadout, and anything said during an emergency. Transmitting those
+-- on one field's frequency is self-defeating - the calls that matter most when you're
+-- away from a field would go out on the one frequency you're least likely to be on.
+-- So they go out on the field's frequencies AND the configured fallback list at once.
+function ATC.wideFrequencies(airbase)
+    local freqs, modes = {}, {}
+    local seen = {}
+
+    local function add(freqList, modeList)
+        local f, m = {}, {}
+        for value in tostring(freqList):gmatch("[^,]+") do table.insert(f, value) end
+        for value in tostring(modeList):gmatch("[^,]+") do table.insert(m, value) end
+        for i, value in ipairs(f) do
+            local key = tostring(tonumber(value) or value)
+            if not seen[key] then
+                seen[key] = true
+                table.insert(freqs, value)
+                table.insert(modes, m[i] or m[#m] or "AM")
+            end
+        end
+    end
+
+    if airbase then
+        add(ATC.fieldFrequencies(airbase))
+    end
+    add(ATC.TTS_FREQUENCY, ATC.TTS_MODULATION)
+    return table.concat(freqs, ","), table.concat(modes, ",")
+end
+
+local function say(groupId, text, airbase, wide)
     trigger.action.outTextForGroup(groupId, text, 15, false)
     -- Mission Lua can't launch processes or write files, so dcs.log is the outbound
     -- channel: voice-bridge/atcai_tts.py tails it for this prefix and speaks the line
     -- over SRS.
-    local freqs, modes = ATC.fieldFrequencies(airbase)
+    local freqs, modes
+    if wide then
+        freqs, modes = ATC.wideFrequencies(airbase)
+    else
+        freqs, modes = ATC.fieldFrequencies(airbase)
+    end
     env.info(string.format("ATCAI_TTS|%s|%s|%s", tostring(freqs), tostring(modes), text))
 end
 
 -- ---------- request plumbing ----------
 
 -- Resolves the common preamble every request needs, or explains why it can't proceed.
--- Returns nil plus a spoken refusal when the request doesn't fit the situation.
+-- Speaks the refusal itself and returns nil when the request doesn't fit the situation.
 local function begin(params, opts)
     local unit = params.unit
     local callsign = ATC.callsign(unit)
     local state = ATC.getState(unit:getName())
     local airborne = unit:inAir()
 
+    -- Refusals always go out wide. A reply explaining why ATC can't help you is exactly
+    -- the one you cannot afford to miss, and the situations that produce it are the
+    -- situations where you're least likely to be tuned to the right field.
+    local function refuse(text, airbase)
+        say(params.groupId, text, airbase, true)
+        return nil
+    end
+
     if opts.requireAirborne and not airborne then
-        return nil, string.format("%s, unable, you're still on the ground.", callsign)
+        return refuse(string.format("%s, unable, you're still on the ground.", callsign))
     end
     if opts.requireGround and airborne then
-        return nil, string.format("%s, unable, you're airborne.", callsign)
+        return refuse(string.format("%s, unable, you're airborne.", callsign))
     end
 
     if opts.phases then
@@ -355,17 +464,26 @@ local function begin(params, opts)
             end
         end
         if not allowed then
-            return nil, string.format("%s, unable, %s", callsign, opts.denial)
+            return refuse(string.format("%s, unable, %s", callsign, opts.denial))
         end
     end
 
     local airbase, distance = ATC.findNearestAirbase(unit)
+    if not airbase and opts.anyDistance then
+        -- An emergency call is answered from wherever it's made; a field out of normal
+        -- range still owns the problem rather than leaving the pilot talking to nobody.
+        airbase, distance = ATC.findDivertField(unit)
+    end
     if not airbase then
+        -- Out of range, so there's no field frequency to use - but the nearest one is
+        -- still the likeliest thing the player is tuned to, so include it.
+        local nearest = ATC.findDivertField(unit)
         if distance and distance < math.huge then
-            return nil, string.format("%s, no ATC in range, nearest field is %d miles.",
-                callsign, math.floor(distance / ATC.METRES_PER_NAUTICAL_MILE + 0.5))
+            return refuse(string.format("%s, no ATC in range, nearest field is %d miles.",
+                callsign, math.floor(distance / ATC.METRES_PER_NAUTICAL_MILE + 0.5)),
+                nearest)
         end
-        return nil, string.format("%s, no ATC in range.", callsign)
+        return refuse(string.format("%s, no ATC in range.", callsign), nearest)
     end
 
     local ctx = {
@@ -377,7 +495,7 @@ local function begin(params, opts)
         tower = ATC.towerName(airbase),
         conditions = ATC.getFieldConditions(airbase),
     }
-    ctx.say = function(text) say(params.groupId, text, airbase) end
+    ctx.say = function(text) say(params.groupId, text, airbase, opts.wide) end
     return ctx
 end
 
@@ -412,24 +530,18 @@ end
 -- ---------- requests ----------
 
 function ATC.requestRadioCheck(params)
-    local ctx, refusal = begin(params, {})
-    if not ctx then
-        say(params.groupId, refusal)
-        return
-    end
+    local ctx = begin(params, {})
+    if not ctx then return end
     ctx.say(string.format("%s, %s, read you five by five.", ctx.callsign, ctx.tower))
 end
 
 function ATC.requestStartup(params)
-    local ctx, refusal = begin(params, {
+    local ctx = begin(params, {
         requireGround = true,
         phases = { ATC.PHASE.PARKED },
         denial = "you've already started up.",
     })
-    if not ctx then
-        say(params.groupId, refusal)
-        return
-    end
+    if not ctx then return end
 
     ctx.state.phase = ATC.PHASE.STARTUP
     ctx.say(string.format("%s, %s, startup approved, %s in use, %s, %s.",
@@ -438,15 +550,12 @@ function ATC.requestStartup(params)
 end
 
 function ATC.requestTaxi(params)
-    local ctx, refusal = begin(params, {
+    local ctx = begin(params, {
         requireGround = true,
         phases = { ATC.PHASE.PARKED, ATC.PHASE.STARTUP },
         denial = "you're already taxiing.",
     })
-    if not ctx then
-        say(params.groupId, refusal)
-        return
-    end
+    if not ctx then return end
 
     ctx.state.phase = ATC.PHASE.HOLDING_SHORT
     ctx.say(string.format("%s, %s, taxi to holding point %s, %s, hold short.",
@@ -454,15 +563,12 @@ function ATC.requestTaxi(params)
 end
 
 function ATC.requestTakeoff(params)
-    local ctx, refusal = begin(params, {
+    local ctx = begin(params, {
         requireGround = true,
         phases = { ATC.PHASE.HOLDING_SHORT, ATC.PHASE.TAKEOFF },
         denial = "request taxi first.",
     })
-    if not ctx then
-        say(params.groupId, refusal)
-        return
-    end
+    if not ctx then return end
 
     local conflict = ATC.checkRunway(ctx)
     if conflict then
@@ -484,11 +590,8 @@ function ATC.requestTakeoff(params)
 end
 
 function ATC.requestInbound(params)
-    local ctx, refusal = begin(params, { requireAirborne = true })
-    if not ctx then
-        say(params.groupId, refusal)
-        return
-    end
+    local ctx = begin(params, { requireAirborne = true })
+    if not ctx then return end
 
     ctx.state.phase = ATC.PHASE.INBOUND
     ctx.say(string.format("%s, %s, %s, join the circuit for %s, %s, %s, report final.",
@@ -497,13 +600,15 @@ function ATC.requestInbound(params)
 end
 
 function ATC.requestLanding(params)
-    local ctx, refusal = begin(params, { requireAirborne = true })
-    if not ctx then
-        say(params.groupId, refusal)
-        return
-    end
+    local ctx = begin(params, { requireAirborne = true })
+    if not ctx then return end
 
-    local conflict = ATC.checkRunway(ctx)
+    -- A declared emergency is never sent around and never sequenced behind anyone;
+    -- the traffic in the way is the traffic that gets moved.
+    local conflict
+    if not ctx.state.emergency then
+        conflict = ATC.checkRunway(ctx)
+    end
     if conflict then
         ctx.state.phase = ATC.PHASE.INBOUND
         if conflict.kind == "runway" then
@@ -519,62 +624,148 @@ function ATC.requestLanding(params)
     end
 
     ctx.state.phase = ATC.PHASE.LANDING
+    if ctx.state.emergency then
+        ctx.say(string.format(
+            "%s, %s, %s, %s, cleared to land, you have priority, emergency vehicles "
+            .. "standing by.",
+            ctx.callsign, ctx.tower, runwayText(ctx.conditions), ctx.conditions.windText))
+        return
+    end
     ctx.say(string.format("%s, %s, %s, %s, cleared to land.",
         ctx.callsign, ctx.tower, runwayText(ctx.conditions), ctx.conditions.windText))
 end
 
+-- ---------- emergencies ----------
+
+-- Declaring puts the aircraft at the front of the queue until it's parked. Everything
+-- that would normally hold it - sequencing, phase order, being outside ATC range - gives
+-- way, which is the whole point of the call.
+function ATC.declareEmergency(params)
+    local ctx = begin(params, { anyDistance = true, wide = true })
+    if not ctx then return end
+
+    ctx.state.emergency = true
+
+    if not ctx.unit:inAir() then
+        ctx.say(string.format(
+            "%s, %s, roger your emergency, shut down where you are, emergency services "
+            .. "are on the way.", ctx.callsign, ctx.tower))
+        return
+    end
+
+    -- Airborne: hand them a runway immediately rather than making them ask again.
+    ctx.state.phase = ATC.PHASE.INBOUND
+    local bearing = ATC.bearingBetween(ctx.unit:getPoint(), ctx.airbase:getPoint())
+    local steer = bearing and string.format("steer %s, ", ATC.headingText(bearing)) or ""
+
+    ctx.say(string.format(
+        "%s, %s, roger your emergency, %s%s, %s in use, %s, %s. You have priority, "
+        .. "cleared to land, emergency vehicles standing by.",
+        ctx.callsign, ctx.tower, steer, ATC.distanceText(ctx.distance),
+        runwayText(ctx.conditions), ctx.conditions.windText, ctx.conditions.qnhText))
+end
+
+-- Where to go when you no longer know, or the field you came from isn't an option.
+-- Answers at any range: being out of ATC range is the situation this call exists for.
+function ATC.requestVectors(params)
+    local ctx = begin(params, { requireAirborne = true, anyDistance = true, wide = true })
+    if not ctx then return end
+
+    local field, distance, bearing = ATC.findDivertField(ctx.unit)
+    if not field then
+        ctx.say(string.format("%s, %s, no friendly field found.", ctx.callsign, ctx.tower))
+        return
+    end
+
+    local name = ATC.towerName(field)
+    if not bearing then
+        ctx.say(string.format("%s, %s, you're overhead %s.", ctx.callsign, ctx.tower, name))
+        return
+    end
+
+    ctx.say(string.format("%s, %s, nearest friendly field is %s, steer %s, %s.",
+        ctx.callsign, ctx.tower, name, ATC.headingText(bearing),
+        ATC.distanceText(distance)))
+end
+
+-- Skipping the circuit, for when flying a full pattern isn't realistic.
+function ATC.requestStraightIn(params)
+    local ctx = begin(params, { requireAirborne = true })
+    if not ctx then return end
+
+    ctx.state.phase = ATC.PHASE.INBOUND
+    ctx.state.straightIn = true
+
+    local conflict = ATC.checkRunway(ctx)
+    if conflict and not ctx.state.emergency then
+        ctx.say(string.format(
+            "%s, %s, straight-in approved for %s, expect delay, traffic %s ahead.",
+            ctx.callsign, ctx.tower, runwayText(ctx.conditions),
+            ATC.distanceText(conflict.distance)))
+        return
+    end
+
+    ctx.say(string.format("%s, %s, cleared straight-in approach %s, %s, %s, report final.",
+        ctx.callsign, ctx.tower, runwayText(ctx.conditions), ctx.conditions.windText,
+        ctx.conditions.qnhText))
+end
+
 function ATC.requestParking(params)
-    local ctx, refusal = begin(params, {
+    local ctx = begin(params, {
         requireGround = true,
         phases = { ATC.PHASE.LANDING, ATC.PHASE.INBOUND, ATC.PHASE.TAKEOFF },
         denial = "you haven't landed.",
     })
-    if not ctx then
-        say(params.groupId, refusal)
+    if not ctx then return end
+
+    local wasEmergency = ctx.state.emergency
+    ctx.state.phase = ATC.PHASE.PARKED
+    ctx.state.emergency = false
+    ctx.state.straightIn = false
+
+    if wasEmergency then
+        ctx.say(string.format(
+            "%s, %s, vacate the runway and taxi to parking, emergency services are "
+            .. "meeting you there.", ctx.callsign, ctx.tower))
         return
     end
-
-    ctx.state.phase = ATC.PHASE.PARKED
     ctx.say(string.format("%s, %s, vacate the runway and taxi to parking.",
         ctx.callsign, ctx.tower))
 end
 
 function ATC.requestATIS(params)
-    local ctx, refusal = begin(params, {})
-    if not ctx then
-        say(params.groupId, refusal)
-        return
-    end
+    local ctx = begin(params, {})
+    if not ctx then return end
 
     local clock = (timer and timer.getAbsTime) and timer.getAbsTime() or 0
     ctx.say(ATC.atisReport(ctx.tower, ctx.conditions, clock))
 end
 
 function ATC.requestLoadout(params)
-    -- Goes through begin() like every other request so the reply is transmitted on the
-    -- field's own frequencies rather than the fallback list.
-    local ctx, refusal = begin(params, {})
-    if not ctx then
-        say(params.groupId, refusal)
-        return
-    end
-
+    -- Your own aircraft reporting its own stores: no tower is involved, so this is never
+    -- refused for range and always goes out wide. It used to run through the standard
+    -- preamble, which meant flying beyond ATC range turned a question about your own
+    -- pylons into "no ATC in range" - on a frequency you weren't tuned to, so all you
+    -- saw was the on-screen text.
     local unit = params.unit
+    local callsign = ATC.callsign(unit)
+    local airbase = ATC.findDivertField(unit)
     local ammo = unit:getAmmo()
 
+    local text
     if not ammo or #ammo == 0 then
-        ctx.say(string.format("%s, no stores remaining.", ATC.callsign(unit)))
-        return
+        text = string.format("%s, no stores remaining.", callsign)
+    else
+        local parts = {}
+        for _, item in ipairs(ammo) do
+            local name = item.desc and (item.desc.displayName or item.desc.typeName)
+                         or "unknown store"
+            table.insert(parts, string.format("%d %s", item.count, name))
+        end
+        text = string.format("%s loadout: %s.", callsign, table.concat(parts, ", "))
     end
 
-    local parts = {}
-    for _, item in ipairs(ammo) do
-        local name = item.desc and (item.desc.displayName or item.desc.typeName) or "unknown store"
-        table.insert(parts, string.format("%d %s", item.count, name))
-    end
-
-    ctx.say(string.format("%s loadout: %s.",
-        ATC.callsign(unit), table.concat(parts, ", ")))
+    say(params.groupId, text, airbase, true)
 end
 
 -- Load traffic awareness if the mission didn't list it explicitly, the same way

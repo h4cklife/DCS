@@ -78,10 +78,39 @@ INTENT_PHRASES = {
         "loadout status",
         "say my loadout",
     ],
+    # Distress calls are deliberately short and distinctive: under stress nobody
+    # produces a full sentence, and "mayday" is unmistakable to the recogniser.
+    "emergency": [
+        "mayday",
+        "mayday mayday",
+        "pan pan",
+        "declare emergency",
+        "declare an emergency",
+        "declaring emergency",
+        "declaring an emergency",
+        "request emergency landing",
+        "emergency landing",
+    ],
+    "vectors": [
+        "request vectors",
+        "request vectors home",
+        "request vectors to nearest field",
+        "request divert",
+        "say nearest field",
+        "where is the nearest field",
+        "nearest airfield",
+    ],
+    "straight_in": [
+        "request straight in",
+        "request straight in approach",
+        "requesting straight in",
+        "straight in approach",
+    ],
 }
 
 # Leading verbs people swap between without thinking. Each pair is expanded both ways.
-VERB_VARIANTS = (("request", "requesting"), ("report", "reporting"))
+VERB_VARIANTS = (("request", "requesting"), ("report", "reporting"),
+                 ("declare", "declaring"))
 
 
 def expand_phrases(phrases):
@@ -117,20 +146,32 @@ def phrase_to_intent():
             for p in expand_phrases(phrases)}
 
 
+# Intents that win over anything else said in the same breath, longest match or not.
+# "Mayday, Chevy 81, request landing" is a declaration with a request attached, and
+# resolving it to "landing" would answer the calm half of a distress call.
+PRIORITY_INTENTS = ("emergency",)
+
+
 def match_intent(text, lookup):
     """Find the request inside a longer transmission.
 
     With wildcard matching the recognised text can carry a callsign, the tower's name,
     a runway and so on around the request itself, so an exact lookup isn't enough.
-    Longest phrase wins, so "request taxi clearance" beats "request taxi".
+    Longest phrase wins, so "request taxi clearance" beats "request taxi" - except for
+    the priority intents above, which win outright.
     """
     spoken = " ".join(text.lower().split())
     exact = lookup.get(spoken)
     if exact:
         return exact
+
     best, best_len = None, 0
     for phrase, intent in lookup.items():
-        if len(phrase) > best_len and re.search(r"\b%s\b" % re.escape(phrase), spoken):
+        if not re.search(r"\b%s\b" % re.escape(phrase), spoken):
+            continue
+        if intent in PRIORITY_INTENTS:
+            return intent
+        if len(phrase) > best_len:
             best, best_len = intent, len(phrase)
     return best
 
