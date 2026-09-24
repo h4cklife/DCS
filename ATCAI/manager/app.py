@@ -26,8 +26,9 @@ import installer  # noqa: E402
 import prefs  # noqa: E402
 import atcai_listen  # noqa: E402
 import atcai_tts  # noqa: E402
+import atcai_mictest  # noqa: E402
 
-VERSION = "1.2.0"
+VERSION = "1.3.0"
 PAD = 8
 
 
@@ -74,6 +75,7 @@ class App(ttk.Frame):
 
         self.installation: installer.Installation | None = None
         self.messages: queue.Queue = queue.Queue()
+        self.mic_events: queue.Queue = queue.Queue()
         self.prefs = prefs.load()
         self.ptt_key_name = str(self.prefs.get("ptt_key_name", "Ctrl"))
         # Saving is suppressed until start-up finishes: _detect() runs before the
@@ -107,13 +109,14 @@ class App(ttk.Frame):
 
         tabs = ttk.Notebook(self)
         tabs.grid(row=1, column=0, sticky="nsew", pady=(PAD, 0))
+        # One job per tab. The Voice tab used to carry all three of these plus the
+        # microphone test, and had grown taller than the window.
         self._build_setup(tabs)
-        self._build_voice(tabs)
+        self._build_talking(tabs)
+        self._build_mic(tabs)
+        self._build_hearing(tabs)
         self._build_settings(tabs)
-
-        self.log_view = tk.Text(self, height=10, wrap="word", state="disabled")
-        self.log_view.grid(row=2, column=0, sticky="nsew", pady=(PAD, 0))
-        self.rowconfigure(2, weight=1)
+        self._build_log(tabs)
 
     def _build_setup(self, tabs):
         tab = ttk.Frame(tabs, padding=PAD)
@@ -145,9 +148,9 @@ class App(ttk.Frame):
                                     justify="left")
         self.voice_hint.grid(row=3, column=0, sticky="w", pady=(PAD, 0))
 
-    def _build_voice(self, tabs):
+    def _build_talking(self, tabs):
         tab = ttk.Frame(tabs, padding=PAD)
-        tabs.add(tab, text="Voice")
+        tabs.add(tab, text="Talking to ATC")
         tab.columnconfigure(0, weight=1)
 
         talk = ttk.LabelFrame(tab, text="Talking to ATC", padding=PAD)
@@ -194,8 +197,61 @@ class App(ttk.Frame):
             "Raise the slider if it reacts when you did not mean it to."
         )).grid(row=6, column=0, columnspan=2, sticky="w", pady=(4, 0))
 
+    def _build_mic(self, tabs):
+        tab = ttk.Frame(tabs, padding=PAD)
+        tabs.add(tab, text="Test Microphone")
+        tab.columnconfigure(0, weight=1)
+
+        mic = ttk.LabelFrame(tab, text="Test microphone", padding=PAD)
+        mic.grid(row=0, column=0, sticky="ew")
+        mic.columnconfigure(1, weight=1)
+
+        mic_buttons = ttk.Frame(mic)
+        mic_buttons.grid(row=0, column=0, columnspan=2, sticky="w")
+        self.mic_button = ttk.Button(mic_buttons, text="Test microphone",
+                                     command=self._start_mic_test)
+        self.mic_button.grid(row=0, column=0, sticky="w")
+        self.mic_list_button = ttk.Button(mic_buttons, text="Show microphones",
+                                          command=self._refresh_inputs)
+        self.mic_list_button.grid(row=0, column=1, sticky="w", padx=(PAD, 0))
+        self.mic_settings_button = ttk.Button(mic_buttons, text="Windows sound settings...",
+                                              command=self._open_sound_settings)
+        self.mic_settings_button.grid(row=0, column=2, sticky="w", padx=(PAD, 0))
+
+        self.mic_device = ttk.Label(mic, text="Press to check what ATCAI can hear.",
+                                    foreground="#555", wraplength=700, justify="left")
+        self.mic_device.grid(row=1, column=0, columnspan=2, sticky="w", pady=(PAD, 0))
+        self.mic_inputs = ttk.Label(mic, text="", foreground="#555", wraplength=700,
+                                    justify="left")
+        self.mic_inputs.grid(row=2, column=0, columnspan=2, sticky="w")
+
+        ttk.Label(mic, text="Input level:").grid(row=3, column=0, sticky="w",
+                                                 pady=(PAD, 0))
+        self.mic_level = tk.IntVar(value=0)
+        ttk.Progressbar(mic, orient="horizontal", length=240, mode="determinate",
+                        maximum=100, variable=self.mic_level
+                        ).grid(row=3, column=1, sticky="w", pady=(PAD, 0))
+
+        self.mic_results = tk.Text(mic, height=8, wrap="word", state="disabled")
+        self.mic_results.grid(row=4, column=0, columnspan=2, sticky="ew", pady=(PAD, 0))
+
+        ttk.Label(mic, wraplength=700, justify="left", foreground="#555", text=(
+            "Runs for 15 seconds. Say a request you would use in the air, like "
+            '"Chevy 81, requesting taxi". It reports which microphone Windows gave '
+            "ATCAI, whether any sound is arriving, and what it heard - including "
+            "anything it heard but could not match, which is invisible while flying.\n"
+            "ATCAI cannot choose the microphone - Windows does. If the wrong one is "
+            "marked in use, change it under Recording in Windows sound settings, then "
+            "test again."
+        )).grid(row=5, column=0, columnspan=2, sticky="w", pady=(4, 0))
+
+    def _build_hearing(self, tabs):
+        tab = ttk.Frame(tabs, padding=PAD)
+        tabs.add(tab, text="Hearing ATC")
+        tab.columnconfigure(0, weight=1)
+
         reply = ttk.LabelFrame(tab, text="Hearing ATC", padding=PAD)
-        reply.grid(row=1, column=0, sticky="ew", pady=(PAD, 0))
+        reply.grid(row=0, column=0, sticky="ew")
         self.speak_button = ttk.Button(reply, text="Start replies",
                                        command=lambda: self._toggle(self.speaker))
         self.speak_button.grid(row=0, column=0, sticky="w")
@@ -219,6 +275,21 @@ class App(ttk.Frame):
             "speakers option - it always works."
         )).grid(row=4, column=0, sticky="w", pady=(4, 0))
 
+    def _build_log(self, tabs):
+        tab = ttk.Frame(tabs, padding=PAD)
+        tabs.add(tab, text="Log")
+        tab.columnconfigure(0, weight=1)
+        tab.rowconfigure(1, weight=1)
+
+        ttk.Label(tab, wraplength=700, justify="left", foreground="#555", text=(
+            "Everything the manager does, and everything the voice bridges report. "
+            "This is the first place to look when something isn't working, and the most "
+            "useful thing to include if you report a problem."
+        )).grid(row=0, column=0, sticky="w")
+
+        self.log_view = tk.Text(tab, height=10, wrap="word", state="disabled")
+        self.log_view.grid(row=1, column=0, sticky="nsew", pady=(PAD, 0))
+
     def _build_settings(self, tabs):
         tab = ttk.Frame(tabs, padding=PAD)
         tabs.add(tab, text="Settings")
@@ -236,12 +307,14 @@ class App(ttk.Frame):
         for index, (key, label, hint) in enumerate(rows):
             ttk.Label(tab, text=label).grid(row=index * 2, column=0, sticky="w",
                                             pady=(PAD if index else 0, 0))
-            var = tk.StringVar()
+            var = tk.StringVar(value=self._default_for(key))
             self.fields[key] = var
             ttk.Entry(tab, textvariable=var, width=40).grid(
                 row=index * 2, column=1, sticky="ew", padx=(PAD, 0),
                 pady=(PAD if index else 0, 0))
-            ttk.Label(tab, text=hint, foreground="#555").grid(
+            default = self._default_for(key)
+            ttk.Label(tab, text="%s  Default: %s" % (hint, default) if default else hint,
+                      foreground="#555").grid(
                 row=index * 2 + 1, column=1, sticky="w", padx=(PAD, 0))
 
         atis = ttk.LabelFrame(tab, text="Repeating airfield information (ATIS)", padding=PAD)
@@ -608,6 +681,201 @@ class App(ttk.Frame):
                     "Voice tab.")
         self.voice_hint.config(text=hint)
 
+    # ---------- microphone test ----------
+
+    def _start_mic_test(self):
+        """Run the diagnostic in the background; results arrive via the event queue."""
+        if getattr(self, "_mic_thread", None) and self._mic_thread.is_alive():
+            return
+
+        if self.listener.running:
+            self._mic_write("Stop listening first - only one thing can hold the "
+                            "microphone at a time.\n", clear=True)
+            return
+
+        self.mic_button.state(["disabled"])
+        self.mic_level.set(0)
+        self.mic_device.config(text="Testing...")
+        self._mic_write("", clear=True)
+        self._mic_heard = 0
+        self._mic_rejected = 0
+        self._mic_inputs_found = []
+        self._mic_signals = []
+        self._mic_problems = []
+        self._mic_finished = False
+
+        def work():
+            try:
+                atcai_mictest.run(
+                    seconds=atcai_mictest.DEFAULT_SECONDS,
+                    on_event=lambda kind, payload: self.mic_events.put(
+                        (kind, payload)),
+                )
+            except Exception as exc:                      # never take the GUI down
+                self.mic_events.put(("ERROR", "test failed: %r" % exc))
+            finally:
+                self.mic_events.put(("DONE", None))
+
+        self._mic_thread = threading.Thread(target=work, daemon=True)
+        self._mic_thread.start()
+
+    def _refresh_inputs(self):
+        """List the active recording devices. Safe while listening - it never opens
+        the microphone, it only asks Windows what exists."""
+        if getattr(self, "_mic_list_thread", None) and self._mic_list_thread.is_alive():
+            return
+        self.mic_list_button.state(["disabled"])
+        self.mic_inputs.config(text="Looking...")
+        self._mic_inputs_found = []
+
+        def work():
+            try:
+                for entry in atcai_mictest.list_devices():
+                    self.mic_events.put(("INPUT", entry))
+            except Exception as exc:                      # never take the GUI down
+                self.mic_events.put(("ERROR", "could not list microphones: %r" % exc))
+            finally:
+                self.mic_events.put(("INPUTS_DONE", None))
+
+        self._mic_list_thread = threading.Thread(target=work, daemon=True)
+        self._mic_list_thread.start()
+
+    def _open_sound_settings(self):
+        """One click to the panel that can change the default, since ATCAI can't."""
+        if atcai_mictest.open_sound_settings(
+                lambda message: self._enqueue("voice", message)):
+            self._mic_write(
+                "Opened Windows sound settings. On the Recording tab, right-click the "
+                "microphone you speak into and choose \"Set as Default Device\", then "
+                "press Test microphone again.\n")
+
+    def _show_inputs(self):
+        """Render the collected device list, marking the one ATCAI will actually get."""
+        found = getattr(self, "_mic_inputs_found", [])
+        self.mic_list_button.state(["!disabled"])
+        if not found:
+            self.mic_inputs.config(text="No active recording devices found.")
+            return
+
+        default = [name for is_default, name in found if is_default]
+        others = [name for is_default, name in found if not is_default]
+
+        parts = []
+        if default:
+            parts.append("In use: %s" % default[0])
+        if others:
+            parts.append("Also available: %s" % ", ".join(others))
+        # The point of showing the others at all: if the one in use is wrong, nothing
+        # else in ATCAI can tell you, because it never sees the alternatives.
+        self.mic_inputs.config(text="   ".join(parts))
+
+    def _mic_write(self, text, clear=False):
+        self.mic_results.config(state="normal")
+        if clear:
+            self.mic_results.delete("1.0", "end")
+        if text:
+            self.mic_results.insert("end", text)
+            self.mic_results.see("end")
+        self.mic_results.config(state="disabled")
+
+    def _on_mic_event(self, kind, payload):
+        """One line of diagnostic output, translated for someone who isn't debugging."""
+        if kind == "DEVICE":
+            self.mic_device.config(text="Windows gave ATCAI: %s" % payload)
+        elif kind == "READY":
+            self._mic_write("Listening for %d seconds - say a request now.\n" % payload)
+        elif kind == "LEVEL":
+            self.mic_level.set(int(payload))
+        elif kind == "PROBLEM":
+            self._mic_problems = getattr(self, "_mic_problems", []) + [payload]
+        elif kind == "HEARD":
+            self._mic_heard = getattr(self, "_mic_heard", 0) + 1
+            self._mic_write('-> heard "%s" (%.0f%% sure)\n' % (payload[1], payload[0] * 100))
+        elif kind == "REJECTED":
+            self._mic_rejected = getattr(self, "_mic_rejected", 0) + 1
+            self._mic_write('~ heard something that matched no request'
+                            '%s\n' % (' - closest was "%s"' % payload[1] if payload[1] else ""))
+        elif kind == "INPUT":
+            self._mic_inputs_found = getattr(self, "_mic_inputs_found", []) + [payload]
+        elif kind == "SIGNAL":
+            self._mic_signals = getattr(self, "_mic_signals", []) + [payload]
+        elif kind == "INPUTS_DONE":
+            self._show_inputs()
+        elif kind == "ERROR":
+            self._mic_write("! %s\n" % payload)
+        elif kind == "DONE":
+            self.mic_button.state(["!disabled"])
+            self.mic_level.set(0)
+            # The script says DONE and so does the worker's finally; only the first
+            # one is a result, the second would print the verdict twice.
+            if getattr(self, "_mic_finished", True):
+                return
+            self._mic_finished = True
+            self._show_inputs()
+            for line in self._mic_problem_lines():
+                self._mic_write("! %s\n" % line)
+            self._mic_write("\n" + self._mic_verdict())
+
+    def _mic_problem_lines(self):
+        """The signal complaints worth passing on.
+
+        The recogniser reports NoSignal during ordinary pauses in speech, so on a
+        working microphone it fires between every sentence. Once something has been
+        understood - or the device itself measured sound - "no audio at all" is simply
+        false, and the quality complaints are the only ones left worth hearing.
+        """
+        problems = list(dict.fromkeys(getattr(self, "_mic_problems", [])))
+        heard = getattr(self, "_mic_heard", 0) or getattr(self, "_mic_rejected", 0)
+        measured = any(is_default and level > 0
+                       for is_default, level, _ in getattr(self, "_mic_signals", []))
+
+        if heard or measured:
+            problems = [p for p in problems if p != "NoSignal"]
+        return [atcai_mictest.describe_problem(p) for p in problems]
+
+    def _mic_verdict(self):
+        """Say what the result means, rather than leaving the player to interpret it."""
+        heard = getattr(self, "_mic_heard", 0)
+        rejected = getattr(self, "_mic_rejected", 0)
+
+        if heard:
+            return ("Test finished. Your microphone works and ATCAI understood you - "
+                    "if it still misses you in the air, raise your voice slightly or "
+                    "turn on push-to-talk.\n")
+        if rejected:
+            return ("Test finished. Sound is reaching ATCAI, but nothing matched a "
+                    "request. Check the wording on the Voice tab, or lower "
+                    '"How sure it must be".\n')
+        signals = getattr(self, "_mic_signals", [])
+        live = [(level, name) for is_default, level, name in signals
+                if not is_default and level > 0]
+        in_use_flat = any(is_default and level == 0 for is_default, level, name in signals)
+
+        if in_use_flat and live:
+            # Measured at the device, so this is not a guess: one microphone produced
+            # nothing and another produced sound while the test ran.
+            best = max(live)[1]
+            return ("Test finished. The microphone in use produced no sound at all, but "
+                    "%s did. That's almost certainly the one you're speaking into - set "
+                    "it as default under Recording in Windows sound settings (set it as "
+                    "the default communications device too) and test again.\n" % best)
+        if in_use_flat:
+            return ("Test finished. The microphone in use produced no sound at all, and "
+                    "no other microphone did either. Check it's switched on, the boom "
+                    "isn't muted, and nothing else has taken it.\n")
+
+        others = [name for is_default, name in getattr(self, "_mic_inputs_found", [])
+                  if not is_default]
+        if others:
+            return ("Test finished. Nothing was heard at all. ATCAI gets whichever "
+                    "microphone Windows marks as default, and you also have %s. If "
+                    "that's the one you speak into, set it as default under Recording "
+                    "in Windows sound settings and test again.\n"
+                    % " and ".join(others))
+        return ("Test finished. Nothing was heard at all. Check the microphone named "
+                "above is the one you speak into - Windows picks it, not ATCAI - and "
+                "that it isn't muted.\n")
+
     def _run_listener(self, _options, on_log, should_stop):
         options = atcai_listen.build_options(
             inbox=str(self.installation.scripts_dir / "inbox.lua") if self.installation else None,
@@ -628,6 +896,16 @@ class App(ttk.Frame):
 
     # ---------- settings ----------
 
+    @staticmethod
+    def _default_for(key):
+        """What a setting is when nothing overrides it, as text for an entry box."""
+        value = installer.CONFIG_DEFAULTS.get(key)
+        if value is None:
+            return ""
+        if isinstance(value, float) and value.is_integer():
+            value = int(value)
+        return str(value)
+
     def _load_settings(self):
         if not self.installation:
             return
@@ -639,8 +917,8 @@ class App(ttk.Frame):
         for key, var in self.fields.items():
             if key in saved:
                 var.set(str(saved[key]))
-            elif not var.get():
-                var.set("")
+            else:
+                var.set(self._default_for(key))
 
     def _save_settings(self):
         settings, problems = {}, []
@@ -680,8 +958,8 @@ class App(ttk.Frame):
         messagebox.showinfo("Saved", "Settings saved.\n\nRestart the mission to use them.")
 
     def _reset_settings(self):
-        for var in self.fields.values():
-            var.set("")
+        for key, var in self.fields.items():
+            var.set(self._default_for(key))
         if self.installation and self.installation.config_path.is_file():
             self.installation.config_path.unlink()
             self._enqueue("setup", "settings back to defaults")
@@ -702,6 +980,14 @@ class App(ttk.Frame):
             self.log_view.insert("end", line + "\n")
             self.log_view.see("end")
             self.log_view.configure(state="disabled")
+
+        while True:
+            try:
+                kind, payload = self.mic_events.get_nowait()
+            except queue.Empty:
+                break
+            self._on_mic_event(kind, payload)
+
         self._refresh_bridge_buttons()
         self.after(150, self._drain)
 
@@ -709,7 +995,10 @@ class App(ttk.Frame):
 def main():
     root = tk.Tk()
     root.title("ATCAI Manager %s" % VERSION)
-    root.geometry("840x680")
+    root.geometry("900x700")
+    # Below this the tab contents start clipping, which is how the Voice tab's options
+    # went unnoticed in the first place.
+    root.minsize(820, 600)
     app = App(root)
 
     def on_close():

@@ -4,7 +4,7 @@
 [![Latest release](https://img.shields.io/github/v/release/h4cklife/DCS?filter=atcai-v*&label=release)](https://github.com/h4cklife/DCS/releases)
 [![Downloads](https://img.shields.io/github/downloads/h4cklife/DCS/total?label=downloads)](https://github.com/h4cklife/DCS/releases)
 [![Licence](https://img.shields.io/github/license/h4cklife/DCS)](../LICENSE)
-[![Tests](https://img.shields.io/badge/tests-243-brightgreen)](#tests)
+[![Tests](https://img.shields.io/badge/tests-327-brightgreen)](#tests)
 ![Platform](https://img.shields.io/badge/platform-Windows-0078d4?logo=windows)
 ![DCS World](https://img.shields.io/badge/DCS%20World-single--player-2ea44f)
 ![Python](https://img.shields.io/badge/python-3.12%2B-3776ab?logo=python&logoColor=white)
@@ -46,6 +46,7 @@ and roadmap.
 | 13 | Push-to-talk, configurable in the manager | **Done** — verified in-game; off by default, key chosen in the app |
 | 14 | Verify traffic awareness in flight | **Done** — flown against `--traffic` AI using the player's field |
 | 15 | Emergency and divert handling — mayday, vectors home, straight-in | **Done** — verified in-game |
+| 16 | Microphone diagnostics and a manager split into one-job tabs | **Done** — reviewed in the app |
 
 ATCAI loads into **every mission you fly** — stock missions, Instant Action, campaigns —
 with no mission editing at all. See Install.
@@ -318,12 +319,53 @@ In `lua/atc/atc_traffic.lua`, if ATC is too cautious or not cautious enough:
 Speak your requests instead of using the comms menu. Uses the speech recogniser built
 into Windows — no models to download, no extra packages.
 
-**Players use the Start button on the manager's Voice tab.** The command below runs the
+**Players use the Start button on the manager's "Talking to ATC" tab.** The command below runs the
 same code directly, which is what you want while developing:
 
 ```
 python3 voice-bridge/atcai_listen.py
 ```
+
+### Diagnosing it: `Test microphone`
+
+The **Test Microphone** tab's button runs `voice-bridge/mictest.ps1` through
+`voice-bridge/atcai_mictest.py` for fifteen seconds and reports:
+
+- **Which recording device Windows gave ATCAI.** `System.Speech` binds to the Windows
+  default and offers no way to choose, so the wrong device is both the most likely cause
+  of "it can't hear me" and completely invisible otherwise. Read via a small Core Audio
+  COM interop — best-effort, and the test still runs if it fails.
+- **A live input level**, so you can see audio arriving at all.
+- **Named signal problems** — `NoSignal`, `TooSoft`, `TooLoud`, `TooNoisy` — translated
+  into something actionable rather than printed as enum names.
+- **Recognitions and rejections, both.** This is the reason it exists. The real
+  recognition loop is synchronous, and `Recognize()` returns `null` for silence *and* for
+  speech that matched no phrase, so a rejected utterance is indistinguishable from saying
+  nothing. Here they're told apart.
+
+It runs the same grammar as the real recogniser, built from the same phrase spec, so a
+phrase that matches in the test matches in the air.
+
+**Show microphones** lists the active capture endpoints with the default marked
+(`EnumAudioEndpoints`, filtered to `DEVICE_STATE_ACTIVE` — an unfiltered list runs to
+twenty entries on a real machine). It runs the script in `-ListOnly` mode, which never
+opens an audio device, so it's safe to use while the recogniser is listening.
+
+**Windows sound settings...** opens the Recording tab (`mmsys.cpl,,1`), falling back to
+`ms-settings:sound`. ATCAI does not set the default device itself: there is no public API
+for it, and the private interface everything else uses is a poor trade for a tool that
+already fights antivirus false positives. See `docs/PLAN.md`.
+
+From a shell, without the manager:
+
+```
+python3 voice-bridge/atcai_mictest.py 15
+```
+
+`mictest.ps1` is deliberately separate from `recognize.ps1`. The recognition path works
+and was expensive to get right; a diagnostic must not be able to break it. The cost is a
+duplicated grammar builder in the two scripts, which `tests/test_mictest.py` guards by
+asserting both are fed the same spec.
 
 Then talk to it the way you'd actually work a radio:
 
@@ -386,7 +428,7 @@ spoken reply, which is unusable in a full-screen sim.
 ATC replies can be spoken over the radio instead of only appearing as on-screen text,
 using SRS's text-to-speech.
 
-**Players use the Start button on the manager's Voice tab**, which runs this in-process.
+**Players use the Start button on the manager's "Hearing ATC" tab**, which runs this in-process.
 The commands below are the same code run directly, for development.
 
 **How it works:** the mission sandbox can't launch processes or write files, so

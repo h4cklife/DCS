@@ -75,6 +75,67 @@ class TestIntents:
             assert listen.INTENT_PHRASES.get(intent), "intent %r has no phrases" % intent
 
 
+class TestPackaging:
+    """A helper script that isn't bundled is missing only in the built exe - the one
+    place it can't be checked by running from source."""
+
+    def test_every_powershell_helper_is_bundled(self):
+        import importlib.util
+        spec = importlib.util.spec_from_file_location(
+            "build_exe", ROOT / "manager" / "build_exe.py")
+        build_exe = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(build_exe)
+
+        bundled = {src.name for src, _ in build_exe.BUNDLED}
+        for script in (ROOT / "voice-bridge").glob("*.ps1"):
+            assert script.name in bundled, (
+                "%s is used at runtime but would be missing from the exe" % script.name)
+
+
+class TestConfigDefaults:
+    """The manager shows these to the player as "what it is now", so a copy that has
+    drifted from the Lua is worse than no copy at all."""
+
+    @pytest.fixture(scope="class")
+    def lua_defaults(self):
+        core = (ATC_DIR / "atc_core.lua").read_text(encoding="utf-8")
+        found = {}
+        for name, value in re.findall(
+                r"ATC\.(\w+)\s*=\s*ATC\.\w+\s+or\s+([^\n-]+)", core):
+            value = value.strip().rstrip(",").strip()
+            if value.startswith('"') and value.endswith('"'):
+                found[name] = value[1:-1]
+            else:
+                try:
+                    found[name] = float(value)
+                except ValueError:
+                    pass
+        return found
+
+    def test_the_lua_actually_declares_them(self, lua_defaults):
+        """Guards the parsing above: if it silently found nothing, every other
+        assertion here would pass vacuously."""
+        for name in ("TTS_FREQUENCY", "AIRBASE_SEARCH_RADIUS", "AIRBASE_AIR_RADIUS"):
+            assert name in lua_defaults, "could not read %s out of atc_core.lua" % name
+
+    def test_each_default_matches_the_lua(self, lua_defaults):
+        import installer
+        for key, value in installer.CONFIG_DEFAULTS.items():
+            lua_name = key.upper()
+            if lua_name not in lua_defaults:
+                continue
+            expected = lua_defaults[lua_name]
+            if isinstance(value, str):
+                assert value == expected, "%s drifted from atc_core.lua" % key
+            else:
+                assert float(value) == float(expected), "%s drifted from atc_core.lua" % key
+
+    def test_every_default_is_a_real_setting(self):
+        import installer
+        unknown = set(installer.CONFIG_DEFAULTS) - set(installer.CONFIG_FIELDS)
+        assert not unknown, "defaults for settings that don't exist: %s" % sorted(unknown)
+
+
 class TestPriority:
     def test_priority_intents_are_real_intents(self):
         unknown = set(listen.PRIORITY_INTENTS) - set(listen.INTENT_PHRASES)

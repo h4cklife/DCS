@@ -40,11 +40,10 @@ below.
 
 ## Talking to ATC, and hearing it
 
-Open the **Voice** tab in the manager and press both **Start** buttons. The labels turn
-green when they're running.
+Press **Start** on two tabs in the manager. The labels turn green when they're running.
 
-- **Start listening** lets you speak to ATC.
-- **Start replies** makes ATC speak back.
+- **Talking to ATC** → **Start listening** lets you speak to ATC.
+- **Hearing ATC** → **Start replies** makes ATC speak back.
 
 Tick **"Start this automatically when the app opens"** on each and you won't have to
 press them again.
@@ -79,7 +78,7 @@ Your callsign, the tower's name and a runway can all be in there — ATCAI picks
 request out of whatever you say. "Request" and "requesting" both work everywhere, and so
 do "declare" and "declaring".
 
-The **Voice** tab shows everything it heard, so if something isn't being picked up you
+The **Log** tab shows everything it heard, so if something isn't being picked up you
 can see why.
 
 ### Hearing ATC on the radio instead of your speakers
@@ -155,6 +154,9 @@ Turn the loop off there too, if you'd rather only hear it when you ask.
 The **Settings** tab has the few things worth changing — the radio frequencies ATC uses,
 and how far out it will answer you. Everything else has a sensible default.
 
+Each box shows what the setting **is right now**, with the stock value named underneath,
+so you can see what you're changing from. **Back to defaults** puts them all back.
+
 Changes apply next time you start a mission.
 
 ## Turning it off
@@ -173,17 +175,39 @@ confuse it with DCS's own **ATC** entry, which lists airports and frequencies �
 stock game feature, nothing to do with this.
 
 **ATC replies on screen but I can't hear it.**
-Press **Start replies** on the Voice tab. If you're using SRS, check the SRS server and
+Press **Start replies** on the "Hearing ATC" tab. If you're using SRS, check the SRS server and
 client are running and your radio is on one of the frequencies from the Settings tab; the
 speakers option avoids all of that.
 
 **Talking to ATC does nothing.**
-Press **Start listening**. Watch the Voice tab while you speak — if it shows what you
-said but didn't act, the wording wasn't recognised; if it shows nothing at all, Windows
-isn't hearing your microphone.
+Open the **Test Microphone** tab and press **Test microphone**. It listens for fifteen
+seconds and tells you
+which of three things is wrong:
+
+- *Nothing was heard at all* — Windows is giving ATCAI the wrong microphone, or the one
+  it named is muted or switched off. **ATCAI can't pick the microphone; Windows does.**
+  Press **Show microphones** to see which ones are available, then **Windows sound
+  settings...** to change it: right-click the one you speak into on the Recording tab and
+  choose "Set as Default Device". If another microphone is available, the test names it
+  for you.
+- *Sound arrived but nothing matched* — the mic is fine and the wording is the problem.
+  Check the phrasings above, or drag "How sure it must be" left.
+- *It understood you* — the mic and the wording are both fine. If it still misses you in
+  the air, that's usually game audio drowning you out; turn on push-to-talk.
+
+The test also names any problem the recogniser has with your signal — too quiet, too
+loud, too much background noise — and shows a level bar so you can see sound arriving.
+
+Stop listening before testing; only one thing can hold the microphone at a time.
+
+**It hears me on a headset but not through speakers.**
+With speakers, the game and ATC's own voice go back into your microphone, and the
+recogniser has to pick you out of all of it. Run **Test microphone** while the game is
+playing — if it reports too much background noise, that's the cause. Push-to-talk fixes
+it outright, because the mic is only open while you hold the key.
 
 **It reacts when I wasn't talking to it.**
-Turn on **"Only listen while I hold a key"** on the Voice tab and pick a key — useful if
+Turn on **"Only listen while I hold a key"** on the "Talking to ATC" tab and pick a key — useful if
 you're on Discord or TeamSpeak while flying. You can also drag the "How sure it must be"
 slider right, or tick "Only react to the exact request".
 
@@ -191,7 +215,7 @@ slider right, or tick "Only react to the exact request".
 See [Is it safe?](#is-it-safe).
 
 **Something else.**
-The box at the bottom of the manager logs everything it does. That's the first place to
+The **Log** tab records everything the manager does. That's the first place to
 look, and the most useful thing to include if you report a problem.
 
 ## Is it safe?

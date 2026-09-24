@@ -1,5 +1,80 @@
 # Changelog
 
+## 1.3.0 - 2026-09-23
+
+### For players
+
+- **A Test Microphone tab.** Press the button and it listens for fifteen seconds, then
+  tells you what ATCAI can actually hear: which microphone Windows handed it, a live
+  input level, any complaint the recogniser has about the signal (too quiet, too loud,
+  too much background noise, no signal at all), and everything it heard — **including
+  speech it heard but couldn't match**, which is invisible while flying. It ends with a
+  plain verdict instead of leaving you to interpret the output.
+
+  Those two cases being told apart is the point. "It can't hear me" and "it hears me but
+  the words don't match" look identical in the air, and they need opposite fixes.
+
+- **It names the microphone in use, and lists the others.** ATCAI can't choose the
+  recording device — Windows does — so the wrong one being selected was both a likely
+  cause of silence and completely invisible. **Show microphones** lists the devices that
+  are actually active, marking the one ATCAI will get. If a test hears nothing and
+  another microphone is available, the verdict names it.
+
+- **Windows sound settings...** opens Windows' Recording tab directly, which is where the
+  default device is changed.
+
+- The test no longer contradicts itself. The recogniser reports "no signal" during
+  ordinary pauses in speech, so a perfectly good microphone produced *"no audio at all
+  from the microphone"* between every sentence it had just understood. Signal complaints
+  are now judged at the end, against whether anything was actually heard, and each is
+  stated once. Complaints that still matter when the words got through — too quiet, too
+  noisy — are kept.
+- The verdict is printed once, not twice.
+- The "no signal" message no longer claims the microphone is broken. It fires whenever
+  the room goes quiet, so it now says as much and only suggests checking the microphone
+  if you were actually speaking — including the headset's own mute switch, which is what
+  caused it in practice.
+
+- **The level meter is measured at the device, not inferred from the recogniser**, and
+  every active microphone is measured, not just the one in use. So instead of "nothing
+  was heard at all", a dead default microphone now reads as *"the microphone in use
+  produced no sound at all, but Microphone (Scarlett 2i2 USB) did"* — which names the one
+  to switch to. It also points out that Windows keeps a separate **default
+  communications device**, so setting only the default device may not be enough.
+
+### Changed
+
+- **The Voice tab is now three tabs** — *Talking to ATC*, *Test Microphone* and *Hearing
+  ATC* — and **the log has a tab of its own**. Everything had been stacked on one tab
+  taller than the window, and the log sat below it taking height from every tab whether
+  you were reading it or not, so controls below the fold were invisible unless you
+  resized. The window now opens at 900x700 and won't shrink below the point where tab
+  contents start clipping.
+- **Settings boxes show what each setting actually is**, with the stock value named
+  underneath, instead of sitting blank until you type in them. A blank box read as "not
+  set" when it meant "using the default", so there was no way to tell what ATC was using.
+  **Back to defaults** now fills the boxes rather than emptying them.
+
+### Known limitations
+
+- **ATCAI still follows the Windows default microphone.** It can report and advise, but
+  not choose. `System.Speech` has no way to select a device, and the private interface
+  other tools use to change the Windows default is not a trade worth making here — see
+  `docs/PLAN.md`. Making ATCAI capture from a device of its own choosing is written up
+  there as the next substantial piece of work.
+
+### For developers
+
+- `voice-bridge/mictest.ps1` and `voice-bridge/atcai_mictest.py`, deliberately separate
+  from the recognition path so a diagnostic can't break it. Device name and enumeration
+  come from a small Core Audio COM interop; both are best-effort and the test still runs
+  if they fail.
+- `tests/test_wiring.py` gained two guards for failures that are silent by nature: every
+  `.ps1` used at runtime is in the exe's bundle list (missing only in the built exe, never
+  from source), and the manager's copy of the Lua config defaults still matches
+  `atc_core.lua` (a drifted copy would display a value ATC isn't using).
+- A test asserts the manager's tab set, since nothing errors when a panel is off-screen.
+
 ## 1.2.0 - 2026-09-21
 
 ### For players

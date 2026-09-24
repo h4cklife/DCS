@@ -46,6 +46,18 @@ USER_SHELL_FOLDERS = r"HKCU\Software\Microsoft\Windows\CurrentVersion\Explorer\U
 
 # Settings the Lua side understands. Mirrors ATC.CONFIG_FIELDS in atc_config.lua;
 # tools/test_installer.py asserts the two agree.
+# What each setting is when nothing overrides it. These are the values the Lua falls
+# back to (ATC.<NAME> = ATC.<NAME> or <default>), copied here so the manager can show
+# the player what a setting currently is rather than an empty box. tests/test_wiring.py
+# reads the Lua and asserts these still match - a silent drift here would have the app
+# confidently displaying the wrong value.
+CONFIG_DEFAULTS = {
+    "tts_frequency": "276.375,251.0,305.0,124.0,127.5",
+    "tts_modulation": "AM,AM,AM,AM,AM",
+    "airbase_search_radius": 6000,
+    "airbase_air_radius": 92600,
+}
+
 CONFIG_FIELDS = {
     "tts_frequency": str,
     "tts_modulation": str,

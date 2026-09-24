@@ -1,7 +1,7 @@
 # ATCAI — architecture and decisions
 
 How ATCAI is built and why it's built that way. Written after the fact: everything here
-describes what exists and ships in v1.2.0, not what is planned.
+describes what exists and ships in v1.3.0, not what is planned.
 
 For the feature-by-feature state of the project see the status table in
 [README.md](../README.md). For the manager app specifically see
@@ -159,6 +159,68 @@ landing request - the calm half of a distress call winning because it happened t
 longer. `PRIORITY_INTENTS` returns the emergency regardless of length. This was found by
 a test written to assert the intended behaviour, not by flying.
 
+**The microphone test is a separate script, not a mode of the recogniser.**
+`recognize.ps1` works and cost a lot of debugging; a diagnostic that could break it would
+be a poor trade. `mictest.ps1` therefore duplicates the small grammar builder rather than
+refactoring the shared part out. The duplication is real and deliberate, and the two are
+kept honest by being fed the same phrase spec, asserted in `tests/test_mictest.py`.
+
+It also has to use the event model (`RecognizeAsync` plus `AudioLevelUpdated`,
+`AudioSignalProblemOccurred` and `SpeechRecognitionRejected`) where the real loop is
+synchronous. That difference is the whole value: a synchronous `Recognize()` returns
+`null` both for silence and for speech that matched no phrase, so while flying you cannot
+tell "the mic is dead" from "the mic is fine, the words didn't match". The events tell
+them apart.
+
+**The level meter reads the audio endpoint, not the recogniser.** `AudioLevelUpdated`
+only describes what the engine is receiving, so a dead default device produced a flat
+meter and `NoSignal` with nothing to compare it against - accurate, and useless. The test
+now also samples `IAudioMeterInformation` on every active capture device while it runs,
+which needs no capture session of its own. That turns "nothing was heard" into "the
+device in use produced nothing and this other one produced sound", which is a measurement
+rather than a guess. It is exactly the case that bit in practice: a wireless headset was
+the default and asleep, while a live audio interface sat one place down the list.
+
+**ATCAI cannot choose the microphone, so the test names it and lists the alternatives.** `System.Speech` offers
+`SetInputToDefaultAudioDevice`, `SetInputToWaveFile` and `SetInputToAudioStream` - there
+is no "use device N". Picking a device would mean feeding the engine a stream from an
+audio library such as NAudio, i.e. a bundled DLL and a new audio front end. Until then
+the wrong default recording device is the likeliest cause of "it can't hear me" and is
+otherwise invisible, so the test reports the device name via a small Core Audio COM
+interop. That interop is best-effort: if it fails the test still runs and says the name
+is unavailable, because a diagnostic that refuses to start is worse than one that knows
+slightly less.
+
+The same enumerator lists the *active* capture endpoints, which is a documented call, so
+the panel can say "in use: X, also available: Y". Only active ones: a real machine can
+carry twenty endpoints - VR headsets, webcams, unplugged jacks - and a list that long is
+worse than none.
+
+**Setting the Windows default was considered and rejected.** There is no public API for
+it. Every tool that does it uses `IPolicyConfig`, a private COM interface Microsoft has
+never documented, whose IID has already varied across Windows versions. Three reasons not
+to: it can break in any update with the failure landing on players rather than on us; it
+is a system-wide change made by a game addon, affecting Discord, SRS and everything else;
+and ATCAI already has an antivirus false-positive problem with its PyInstaller build, to
+which runtime-compiled C# calling undocumented COM to mutate system audio config would
+add a textbook heuristic trigger. Instead the manager opens Windows' own Recording tab
+(`mmsys.cpl,,1`) and leaves the change to the player.
+
+**The manager shows effective settings, not empty boxes.** The settings entries used to
+start blank and only fill in from a saved `config.lua`, so a player had no way to tell
+what ATC was using - blank read as "not set" when it meant "using the default". The boxes
+now start at the default and are overwritten by any saved value. That needs a Python copy
+of defaults which live in the Lua (`ATC.X = ATC.X or <default>`), so `CONFIG_DEFAULTS` in
+`installer.py` is checked against `atc_core.lua` by a test: a drifted copy would have the
+app confidently displaying a value ATC isn't using, which is worse than showing nothing.
+
+**One job per tab.** Talking, the microphone test and hearing ATC were stacked on a single
+Voice tab that had grown taller than the window, so its lower controls were invisible
+without resizing - which is how the push-to-talk and microphone controls came to be hard
+to find. They are now separate tabs, the log has its own, and the window carries a
+`minsize` below which content would clip. A test asserts the tab set, because the failure
+mode here is silent: nothing errors when a panel is off-screen.
+
 **A few replies transmit wide; most don't.** ATC normally answers on the field's own
 frequency, which is the point of reading real frequencies out of the terrain. But the
 calls that matter when you're away from a field - a refusal, a loadout check, an
@@ -186,6 +248,44 @@ changing it alters the behaviour of every existing request and deserves its own 
 defaults to true when `getCoalition` is missing or errors. Guessing wrong in that
 direction offers a runway that might be hostile; guessing the other way withholds one
 from a pilot who needs it.
+
+## Next, when there's appetite for it
+
+**ATCAI should own its microphone instead of following the Windows default.** This is the
+standing candidate for the next substantial phase - raise it whenever the question is
+"what's next".
+
+Today `System.Speech` binds to whatever Windows marks as the default recording device,
+which is why the manager can only report and advise. A microphone chosen in the manager
+would stay chosen no matter what Windows does when a headset powers off, and the whole
+class of "it worked yesterday" problems would disappear.
+
+**This was first written up as expensive - bundling NAudio, a blocking `Stream`
+subclass, a rewritten audio front end. That estimate was wrong.** Probing SAPI on a real
+machine (2026-09-21) showed two much cheaper routes, both verified:
+
+1. **SAPI's default audio input token is settable, without elevation.**
+   `SAPI.SpObjectTokenCategory` on `HKLM\SOFTWARE\Microsoft\Speech\AudioInput` has a
+   writable `Default`, and setting it to a specific device token reads back correctly.
+   This pins the input for speech applications only - Windows' own default, and therefore
+   Discord and SRS, are untouched. If `System.Speech`'s `SetInputToDefaultAudioDevice()`
+   honours that token, `recognize.ps1` needs no change at all and the whole phase is a
+   dropdown plus one registry write.
+2. **`SpInprocRecognizer.AudioInput` takes a device token directly.** Verified switching
+   between two real devices and reading the assignment back. This route is certain to
+   work, but it means driving SAPI's recogniser instead of `System.Speech`, which means
+   rebuilding the grammar in SAPI terms - and the wildcard grammar is the part that took
+   the most tuning, so this is the fallback rather than the first choice.
+
+**The one open question** is whether `System.Speech` follows SAPI's category default or
+asks Windows independently. Comparing `AudioFormat` across pinned devices did not settle
+it - SAPI normalises every input to 16 kHz mono, so the format is identical either way.
+Settling it needs a different probe: check which endpoint holds an active capture session
+while the engine runs (`IAudioSessionManager2`, or an exclusive-mode `IAudioClient`
+open that fails when the device is in use).
+
+If route 1 holds, this is small. If it doesn't, route 2 works but costs the grammar.
+Either way it no longer needs NAudio, a bundled DLL, or a blocking stream.
 
 ## Still open
 
