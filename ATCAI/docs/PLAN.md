@@ -1,7 +1,7 @@
 # ATCAI — architecture and decisions
 
 How ATCAI is built and why it's built that way. Written after the fact: the bulk of it
-describes what exists and ships in v1.3.0. Two sections near the end look forward - what
+describes what exists and ships in v1.4.0. Two sections near the end look forward - what
 is worth building next, and what is possible but deliberately left alone.
 
 For the feature-by-feature state of the project see the status table in

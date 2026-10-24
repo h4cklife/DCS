@@ -108,6 +108,21 @@ INTENT_PHRASES = {
     ],
 }
 
+# Intents handled outside the mission, by pressing keys in DCS's comms menu, rather
+# than by writing to the inbox the mission polls. The authority is the key maps
+# themselves: an intent is a comms command because some map defines it, not because of
+# how its name happens to be spelled.
+def comms_intents():
+    try:
+        import atcai_keys
+        return atcai_keys.comms_intents()
+    except Exception:                                    # no maps, or unreadable
+        return set()
+
+
+def is_comms_intent(intent):
+    return bool(intent) and intent in comms_intents()
+
 # Leading verbs people swap between without thinking. Each pair is expanded both ways.
 VERB_VARIANTS = (("request", "requesting"), ("report", "reporting"),
                  ("declare", "declaring"))
@@ -140,10 +155,46 @@ def no_window():
     return {"creationflags": getattr(subprocess, "CREATE_NO_WINDOW", 0x08000000)}
 
 
-def phrase_to_intent():
-    return {p.lower(): intent
-            for intent, phrases in INTENT_PHRASES.items()
-            for p in expand_phrases(phrases)}
+def phrase_to_intent(on_log=None):
+    """Every phrase the recogniser should listen for, mapped to its intent.
+
+    ATC requests come from INTENT_PHRASES above. Comms-menu commands come from the
+    per-aircraft key maps, so a player can change what they say by editing a JSON file
+    rather than the source.
+    """
+    lookup = {p.lower(): intent
+              for intent, phrases in INTENT_PHRASES.items()
+              for p in expand_phrases(phrases)}
+
+    try:
+        import atcai_keys
+        comms, conflicts = atcai_keys.all_phrases()
+    except Exception:
+        return lookup
+
+    # Map phrases get the same verb expansion ATC phrases do, so "request picture" and
+    # "requesting picture" both work without every map having to list both.
+    expanded = {}
+    for phrase, intent in comms.items():
+        for variant in expand_phrases([phrase]):
+            expanded.setdefault(variant, intent)
+
+    for phrase, intent in expanded.items():
+        if phrase in lookup and lookup[phrase] != intent:
+            # An ATC request and a comms command wanting the same words. ATC wins,
+            # because it is the module's own function; the clash is worth reporting
+            # rather than quietly losing one of them.
+            if on_log:
+                on_log('! "%s" is claimed by both %s and %s - keeping %s'
+                       % (phrase, lookup[phrase], intent, lookup[phrase]))
+            continue
+        lookup[phrase] = intent
+
+    if conflicts and on_log:
+        for phrase, first, second in conflicts:
+            on_log('! "%s" means %s in one key map and %s in another - ignoring it'
+                   % (phrase, first, second))
+    return lookup
 
 
 # Intents that win over anything else said in the same breath, longest match or not.
@@ -174,6 +225,100 @@ def match_intent(text, lookup):
         if len(phrase) > best_len:
             best, best_len = intent, len(phrase)
     return best
+
+
+class StateWatcher(object):
+    """Keeps the latest ATCAI_STATE the mission published.
+
+    Only needed for comms-menu commands, which must know what aircraft you are in and
+    whether you have wingmen. Starts lazily and fails quiet: if the log cannot be read,
+    comms commands refuse with "no mission state yet" rather than guessing.
+    """
+
+    def __init__(self, log_path=None, on_log=None):
+        self.log_path = log_path
+        self.state = None
+        self.on_log = on_log or (lambda message: None)
+        self._stop = threading.Event()
+        self._thread = None
+
+    def start(self):
+        if self._thread or not self.log_path:
+            return
+        self._thread = threading.Thread(target=self._watch, daemon=True)
+        self._thread.start()
+
+    def stop(self):
+        self._stop.set()
+
+    def _watch(self):
+        try:
+            import atcai_keys
+            import atcai_tts
+        except ImportError as exc:
+            self.on_log("! cannot watch mission state: %s" % exc)
+            return
+
+        last = None
+        for line in atcai_tts.follow(self.log_path, should_stop=self._stop.is_set):
+            if atcai_keys.STATE_PREFIX not in line:
+                continue
+            parsed = atcai_keys.parse_state(line)
+            if not parsed:
+                continue
+            self.state = parsed
+            # The slots matter more than the count now: they decide whether a
+            # per-wingman command is refused, so they have to be visible. Showing only
+            # the count made the deciding fact invisible in the log.
+            alive = [str(n) for n in (2, 3, 4) if parsed.get("slot%d" % n)]
+            summary = "%s, %d wingmen (slots %s), awacs=%s, tanker=%s" % (
+                parsed.get("aircraft"), parsed.get("wingmen", 0),
+                ",".join(alive) if alive else "none",
+                parsed.get("awacs"), parsed.get("tanker"))
+            if summary != last:
+                last = summary
+                self.on_log("mission state: %s" % summary)
+
+
+def _handle_comms(intent, text, confidence, watcher, args, say):
+    """A comms-menu command. Phase A resolves and reports; it never presses anything."""
+    try:
+        import atcai_keys
+    except ImportError as exc:
+        say("! comms keys unavailable: %s" % exc)
+        return
+
+    sending = bool(getattr(args, "send_keys", False))
+    resolution = atcai_keys.resolve(
+        intent, watcher.state, enabled=getattr(args, "comms_keys", False),
+        sending=sending)
+
+    if not resolution.ok:
+        say('~ "%s" -> %s: %s' % (text, intent, resolution.reason))
+        return
+
+    described = atcai_keys.describe(resolution)
+
+    # Sending for real is a separate opt-in from listening for these commands at all,
+    # so the dry run stays available as the safe default and as the way to check a map.
+    if not sending:
+        atcai_keys.DryRun().send(resolution.keys, resolution.delay_ms)
+        say('-> "%s" (%.2f) -> %s | would press: %s' % (
+            text, confidence, intent, described))
+        return
+
+    try:
+        import atcai_sendkeys
+    except ImportError as exc:
+        say("! cannot send keys: %s" % exc)
+        return
+
+    sender = atcai_sendkeys.SendKeys()
+    if sender.send(resolution.keys, resolution.delay_ms):
+        say('-> "%s" (%.2f) -> %s | pressed: %s' % (
+            text, confidence, intent, described))
+    else:
+        say('~ "%s" -> %s not sent: %s' % (text, intent, sender.last_error))
 
 
 def default_inbox_path(windows_user):
@@ -277,6 +422,7 @@ def build_options(**overrides):
         windows_user=os.environ.get("DCS_WINDOWS_USER", ""),
         inbox=None, min_confidence=0.6, strict=False,
         ptt_enabled=False, ptt_key_code=0x11, ptt_key_name="Left Ctrl",
+        comms_keys=False, send_keys=False, dcs_log=None,
     )
     defaults.update(overrides)
     return argparse.Namespace(**defaults)
@@ -289,7 +435,7 @@ def run(args, on_log=None, should_stop=None):
     show what was heard.
     """
     say = on_log or (lambda message: print(message, flush=True))
-    lookup = phrase_to_intent()
+    lookup = phrase_to_intent(on_log=say)
 
     inbox = args.inbox or default_inbox_path(args.windows_user or "")
     try:
@@ -312,6 +458,14 @@ def run(args, on_log=None, should_stop=None):
     ptt = PushToTalk(getattr(args, "ptt_enabled", False),
                      getattr(args, "ptt_key_code", 0x11))
     ptt.start()
+
+    watcher = StateWatcher(getattr(args, "dcs_log", None), on_log=say)
+    if getattr(args, "comms_keys", False):
+        watcher.start()
+        if getattr(args, "send_keys", False):
+            say("Comms key commands: SENDING KEYS to DCS when it has focus.")
+        else:
+            say("Comms key commands: dry run only - nothing will be pressed.")
 
     say("Commands go to %s" % inbox)
     say("%d phrasings, %s matching." % (
@@ -376,10 +530,15 @@ def run(args, on_log=None, should_stop=None):
                 say('~ heard "%s" but the push-to-talk key was not held' % text)
                 continue
 
+            if is_comms_intent(intent):
+                _handle_comms(intent, text, confidence, watcher, args, say)
+                continue
+
             write_inbox(inbox, intent)
             say('-> "%s" (%.2f) -> %s' % (text, confidence, intent))
     finally:
         ptt.stop()
+        watcher.stop()
         if proc.poll() is None:
             proc.terminate()
         try:
@@ -402,6 +561,15 @@ def main():
                         help="virtual-key code to hold for push-to-talk, e.g. 0x11 for Ctrl")
     parser.add_argument("--ptt", dest="ptt_enabled", action="store_true",
                         help="only act on speech while the push-to-talk key is held")
+    parser.add_argument("--comms-keys", dest="comms_keys", action="store_true",
+                        help="enable DCS comms-menu commands. Phase A: dry run only, "
+                             "nothing is pressed")
+    parser.add_argument("--send-keys", dest="send_keys", action="store_true",
+                        help="actually press the keys rather than only logging them. "
+                             "Requires --comms-keys, and refuses unless DCS has focus")
+    parser.add_argument("--dcs-log", dest="dcs_log", default=None,
+                        help="path to dcs.log, where the mission publishes the state "
+                             "comms-menu commands need")
     parser.add_argument("--strict", action="store_true",
                         help="require the request to be the whole utterance, with no "
                              "callsign or other words around it. Less natural, but "

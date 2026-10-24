@@ -12,8 +12,10 @@ from __future__ import annotations
 
 import os
 import queue
+import subprocess
 import sys
 import threading
+import time
 import tkinter as tk
 from pathlib import Path
 from tkinter import filedialog, messagebox, ttk
@@ -27,8 +29,10 @@ import prefs  # noqa: E402
 import atcai_listen  # noqa: E402
 import atcai_tts  # noqa: E402
 import atcai_mictest  # noqa: E402
+import atcai_keys  # noqa: E402
+import atcai_sendkeys  # noqa: E402
 
-VERSION = "1.3.0"
+VERSION = "1.4.0"
 PAD = 8
 
 
@@ -115,6 +119,7 @@ class App(ttk.Frame):
         self._build_talking(tabs)
         self._build_mic(tabs)
         self._build_hearing(tabs)
+        self._build_comms(tabs)
         self._build_settings(tabs)
         self._build_log(tabs)
 
@@ -275,6 +280,164 @@ class App(ttk.Frame):
             "speakers option - it always works."
         )).grid(row=4, column=0, sticky="w", pady=(4, 0))
 
+    def _build_comms(self, tabs):
+        """DCS's own comms menus, driven by keystrokes. Dry run only for now."""
+        tab = ttk.Frame(tabs, padding=PAD)
+        tabs.add(tab, text="Comms Keys")
+        tab.columnconfigure(0, weight=1)
+
+        box = ttk.LabelFrame(tab, text="DCS comms menu commands (experimental)",
+                             padding=PAD)
+        box.grid(row=0, column=0, sticky="ew")
+        box.columnconfigure(1, weight=1)
+
+        self.comms_keys_enabled = tk.BooleanVar(value=False)
+        ttk.Checkbutton(box, variable=self.comms_keys_enabled, command=self._remember,
+                        text="Listen for comms menu commands (dry run - presses nothing)"
+                        ).grid(row=0, column=0, columnspan=2, sticky="w")
+
+        ttk.Label(box, text="Aircraft:").grid(row=1, column=0, sticky="w",
+                                              pady=(PAD, 0))
+        self.comms_aircraft = ttk.Label(box, text="not in a mission yet",
+                                        foreground="#555")
+        self.comms_aircraft.grid(row=1, column=1, sticky="w", padx=(PAD, 0),
+                                 pady=(PAD, 0))
+
+        ttk.Label(box, text="Key maps:").grid(row=2, column=0, sticky="w")
+        maps_row = ttk.Frame(box)
+        maps_row.grid(row=2, column=1, sticky="w", padx=(PAD, 0))
+        self.comms_maps = ttk.Label(maps_row, text="", foreground="#555",
+                                    wraplength=520, justify="left")
+        self.comms_maps.grid(row=0, column=0, sticky="w")
+        ttk.Button(maps_row, text="Use shipped maps",
+                   command=self._reset_comms_maps).grid(row=0, column=1, sticky="w",
+                                                        padx=(PAD, 0))
+        self.comms_maps_path = ttk.Label(box, text="", foreground="#555",
+                                         wraplength=700, justify="left")
+        self.comms_maps_path.grid(row=3, column=0, columnspan=2, sticky="w")
+        self._refresh_comms_maps()
+
+        ttk.Label(box, wraplength=700, justify="left", text=(
+            'Say things like "two rejoin", "flight engage", "awacs picture" or '
+            '"bogey dope". These work the comms menu DCS already has — ATCAI cannot '
+            "reach it any other way."
+        )).grid(row=3, column=0, columnspan=2, sticky="w", pady=(PAD, 0))
+
+        self.send_keys_enabled = tk.BooleanVar(value=False)
+        ttk.Checkbutton(box, variable=self.send_keys_enabled,
+                        command=self._on_send_keys_toggled,
+                        text="Actually press the keys (otherwise dry run)"
+                        ).grid(row=6, column=0, columnspan=2, sticky="w", pady=(PAD, 0))
+
+        keys_test = ttk.Frame(box)
+        keys_test.grid(row=7, column=0, columnspan=2, sticky="w")
+        ttk.Button(keys_test, text="Test keys in Notepad",
+                   command=self._test_keys_in_notepad).grid(row=0, column=0, sticky="w")
+        self.keys_focus = ttk.Label(keys_test, text="", foreground="#555")
+        self.keys_focus.grid(row=0, column=1, sticky="w", padx=(PAD, 0))
+
+        ttk.Label(box, wraplength=700, justify="left", foreground="#555", text=(
+            "The Notepad test types F-keys into Notepad instead of DCS. If nothing "
+            "arrives there, Windows is refusing the synthetic keystrokes and no key "
+            "map will help — which is worth knowing separately from a wrong sequence."
+        )).grid(row=8, column=0, columnspan=2, sticky="w", pady=(4, 0))
+
+        ttk.Label(box, wraplength=700, justify="left", foreground="#b45309", text=(
+            "Keys are only ever sent while DCS is the active window. If you alt-tab "
+            "away mid-command the rest of the sequence is dropped rather than typed "
+            "into whatever you switched to.\n"
+            "Unlike the rest of ATCAI, this works the game rather than only reading "
+            "it, so it can affect what your flight does and therefore how a mission "
+            "turns out."
+        )).grid(row=8, column=0, columnspan=2, sticky="w", pady=(PAD, 0))
+
+    def _on_send_keys_toggled(self):
+        """Pressing keys for real is a different proposition from logging them, so it
+        says so plainly rather than flipping silently."""
+        self._remember()
+        if self.send_keys_enabled.get():
+            self._enqueue("voice", "comms keys will now be PRESSED in DCS - restart "
+                                   "listening for this to take effect")
+        else:
+            self._enqueue("voice", "comms keys back to dry run - restart listening")
+
+    def _test_keys_in_notepad(self):
+        """Prove synthetic keystrokes reach a window at all, without involving DCS.
+
+        If this works and DCS still does nothing, the problem is DirectInput rather
+        than our sequences - two failures that are otherwise indistinguishable.
+        """
+        if not atcai_sendkeys.available():
+            self._enqueue("voice", "sending keys needs Windows")
+            return
+
+        try:
+            subprocess.Popen(["notepad.exe"], **atcai_listen.no_window())
+        except OSError as exc:
+            self._enqueue("voice", "could not start Notepad: %s" % exc)
+            return
+
+        self._enqueue("voice", "Notepad opening - typing 'dcs' into it in 3 seconds. "
+                               "Leave it focused.")
+
+        def work():
+            time.sleep(3)
+            sender = atcai_sendkeys.SendKeys(target_process="notepad.exe")
+            where = sender._focus() or "unknown"
+            ok = sender.send(["d", "c", "s"], delay_ms=120)
+            self.mic_events.put(("KEYTEST", (ok, where, sender.last_error)))
+
+        threading.Thread(target=work, daemon=True).start()
+
+    def _reset_comms_maps(self):
+        """Replace the player's maps with the shipped ones, discarding local edits."""
+        if not messagebox.askyesno(
+                "Use shipped maps",
+                "Replace your key maps with the versions that came with this build?\n\n"
+                "Any phrasings or sequences you changed yourself will be lost."):
+            return
+        replaced = atcai_keys.refresh_user_keymaps()
+        self._enqueue("app", "key maps reset to the shipped versions: %s"
+                      % (", ".join(replaced) or "none"))
+        self._refresh_comms_maps()
+
+    def _refresh_comms_maps(self):
+        try:
+            # Seeded on first run so the maps are somewhere the player can actually
+            # edit them - the shipped copies live inside the exe.
+            copied = atcai_keys.seed_user_keymaps()
+            if copied:
+                self._enqueue("app", "key maps for %s copied to %s - edit them there"
+                              % (", ".join(copied), atcai_keys.user_keymap_dir()))
+            maps = atcai_keys.available_maps()
+            folder = atcai_keys.keymap_dir()
+            stale = atcai_keys.stale_user_keymaps()
+        except Exception:                                  # never take the GUI down
+            maps, folder, stale = [], "", []
+
+        if stale:
+            # Reading prefers the player's folder, so a shipped correction would be
+            # silently ignored. Saying so is better than leaving it a mystery.
+            self.comms_maps_path.config(
+                text="Reading from %s. Your copy of %s differs from the shipped one - "
+                     "press \"Use shipped maps\" to discard those edits."
+                     % (folder, ", ".join(stale)),
+                foreground="#b45309")
+        else:
+            self.comms_maps_path.config(text="Reading from %s" % folder,
+                                        foreground="#555")
+        if maps:
+            labelled = []
+            for aircraft in maps:
+                try:
+                    verified = atcai_keys.load_keymap(aircraft).get("verified")
+                except Exception:
+                    verified = False
+                labelled.append(aircraft if verified else "%s (unverified)" % aircraft)
+            self.comms_maps.config(text=", ".join(labelled))
+        else:
+            self.comms_maps.config(text="none found")
+
     def _build_log(self, tabs):
         tab = ttk.Frame(tabs, padding=PAD)
         tabs.add(tab, text="Log")
@@ -360,6 +523,8 @@ class App(ttk.Frame):
         self.atis_enabled.set(bool(self.prefs["atis_enabled"]))
         self.atis_auto.set(bool(self.prefs["atis_auto_frequency"]))
         self.atis_frequency.set(str(self.prefs["atis_frequency"]))
+        self.comms_keys_enabled.set(bool(self.prefs["comms_keys_enabled"]))
+        self.send_keys_enabled.set(bool(self.prefs["send_keys_enabled"]))
         self._on_atis_changed()
 
         started = []
@@ -394,6 +559,8 @@ class App(ttk.Frame):
             "atis_enabled": bool(self.atis_enabled.get()),
             "atis_auto_frequency": bool(self.atis_auto.get()),
             "atis_frequency": self.atis_frequency.get().strip() or "380.000",
+            "comms_keys_enabled": bool(self.comms_keys_enabled.get()),
+            "send_keys_enabled": bool(self.send_keys_enabled.get()),
         })
         prefs.save(self.prefs)
 
@@ -799,6 +966,17 @@ class App(ttk.Frame):
             self._mic_inputs_found = getattr(self, "_mic_inputs_found", []) + [payload]
         elif kind == "SIGNAL":
             self._mic_signals = getattr(self, "_mic_signals", []) + [payload]
+        elif kind == "KEYTEST":
+            ok, where, error = payload
+            self.keys_focus.config(
+                text="keys arrived" if ok else "nothing sent",
+                foreground="#15803d" if ok else "#b45309")
+            if ok:
+                self._enqueue("voice", "key test: 'dcs' typed into %s - synthetic "
+                                       "keystrokes work on this machine" % where)
+            else:
+                self._enqueue("voice", "key test failed (%s was focused): %s"
+                                       % (where, error))
         elif kind == "INPUTS_DONE":
             self._show_inputs()
         elif kind == "ERROR":
@@ -884,6 +1062,10 @@ class App(ttk.Frame):
             ptt_enabled=bool(self.ptt_enabled.get()),
             ptt_key_code=int(self.ptt_key_code),
             ptt_key_name=str(self.ptt_key_name),
+            comms_keys=bool(self.comms_keys_enabled.get()),
+            send_keys=bool(self.send_keys_enabled.get()),
+            dcs_log=(str(self.installation.path / "Logs" / "dcs.log")
+                     if self.installation else None),
         )
         atcai_listen.run(options, on_log=on_log, should_stop=should_stop)
 

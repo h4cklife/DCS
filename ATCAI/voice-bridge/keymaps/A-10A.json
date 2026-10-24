@@ -1,0 +1,204 @@
+{
+  "aircraft": "A-10A",
+  "verified": false,
+  "verified_notes": [
+    "Stock comms tree, copied from the verified F-15C map.",
+    "UNVERIFIED: these sequences have NOT been checked in this aircraft. While",
+    "verified is false the commands will dry-run only - they are logged, never",
+    "pressed - so you can compare them against the real menu safely.",
+    "To verify: fly it, say each command, read the logged sequence, check it against",
+    "the comms menu, correct anything wrong, then set \"verified\": true.",
+    "'{wingman}' is filled in when you speak: DCS numbers the per-wingman entries by",
+    "position among the survivors, so the key depends on who is still flying.",
+    "Edit the 'phrases' lists to change what you say."
+  ],
+  "comms_key": "backslash",
+  "delay_ms": 90,
+  "commands": {
+    "wingman2_rejoin": {
+      "wingman": 2,
+      "keys": [
+        "comms",
+        "{wingman}",
+        "F9"
+      ],
+      "requires": [
+        "slot2"
+      ],
+      "refusal": "two is not with you",
+      "phrases": [
+        "two rejoin",
+        "two rejoin formation"
+      ]
+    },
+    "wingman2_engage": {
+      "wingman": 2,
+      "keys": [
+        "comms",
+        "{wingman}",
+        "F1",
+        "F3"
+      ],
+      "requires": [
+        "slot2"
+      ],
+      "refusal": "two is not with you",
+      "phrases": [
+        "two engage",
+        "two engage bandits",
+        "two attack bandits"
+      ]
+    },
+    "wingman3_rejoin": {
+      "wingman": 3,
+      "keys": [
+        "comms",
+        "{wingman}",
+        "F9"
+      ],
+      "requires": [
+        "slot3"
+      ],
+      "refusal": "three is not with you",
+      "phrases": [
+        "three rejoin",
+        "three rejoin formation"
+      ]
+    },
+    "wingman3_engage": {
+      "wingman": 3,
+      "keys": [
+        "comms",
+        "{wingman}",
+        "F1",
+        "F3"
+      ],
+      "requires": [
+        "slot3"
+      ],
+      "refusal": "three is not with you",
+      "phrases": [
+        "three engage",
+        "three engage bandits",
+        "three attack bandits"
+      ]
+    },
+    "wingman4_rejoin": {
+      "wingman": 4,
+      "keys": [
+        "comms",
+        "{wingman}",
+        "F9"
+      ],
+      "requires": [
+        "slot4"
+      ],
+      "refusal": "four is not with you",
+      "phrases": [
+        "four rejoin",
+        "four rejoin formation"
+      ]
+    },
+    "wingman4_engage": {
+      "wingman": 4,
+      "keys": [
+        "comms",
+        "{wingman}",
+        "F1",
+        "F3"
+      ],
+      "requires": [
+        "slot4"
+      ],
+      "refusal": "four is not with you",
+      "phrases": [
+        "four engage",
+        "four engage bandits",
+        "four attack bandits"
+      ]
+    },
+    "flight_rejoin": {
+      "keys": [
+        "comms",
+        "F1",
+        "F9",
+        "F1"
+      ],
+      "requires": [
+        "wingmen>=1"
+      ],
+      "refusal": "no wingmen to rejoin",
+      "phrases": [
+        "flight rejoin",
+        "flight rejoin formation",
+        "rejoin formation"
+      ]
+    },
+    "flight_engage": {
+      "keys": [
+        "comms",
+        "F1",
+        "F1",
+        "F3"
+      ],
+      "requires": [
+        "wingmen>=1"
+      ],
+      "refusal": "no wingmen to engage",
+      "phrases": [
+        "flight engage",
+        "flight engage bandits",
+        "engage bandits"
+      ]
+    },
+    "flight_rtb": {
+      "keys": [
+        "comms",
+        "F1",
+        "F3",
+        "F1"
+      ],
+      "requires": [
+        "wingmen>=1"
+      ],
+      "refusal": "no wingmen to send home",
+      "phrases": [
+        "flight return to base",
+        "flight rtb",
+        "flight go home"
+      ]
+    },
+    "awacs_picture": {
+      "keys": [
+        "comms",
+        "F7",
+        "F5"
+      ],
+      "requires": [
+        "awacs"
+      ],
+      "refusal": "no AWACS on station",
+      "phrases": [
+        "awacs picture",
+        "request picture",
+        "say picture"
+      ]
+    },
+    "awacs_bogey_dope": {
+      "keys": [
+        "comms",
+        "F7",
+        "F4"
+      ],
+      "requires": [
+        "awacs"
+      ],
+      "refusal": "no AWACS on station",
+      "phrases": [
+        "awacs bogey dope",
+        "request bogey dope",
+        "bogey dope"
+      ]
+    }
+  }
+}

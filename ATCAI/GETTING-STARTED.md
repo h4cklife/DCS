@@ -149,6 +149,89 @@ that clashes with an airfield, or one most aircraft radios can't tune.
 
 Turn the loop off there too, if you'd rather only hear it when you ask.
 
+## Talking to your wingmen and AWACS
+
+Separate from everything above. ATC is ATCAI's own invention; your **wingmen and AWACS
+belong to DCS**, and the only way to reach them is the comms menu you already use. So
+ATCAI works that menu for you — it presses the keys.
+
+That makes it different from the rest of the module, and it is **off by default**. The
+**Comms Keys** tab has two switches:
+
+1. **Listen for comms menu commands** — recognises them and logs what it *would* press.
+2. **Actually press the keys** — sends them for real.
+
+Start with only the first. Say a command, read the Log tab, and check the sequence
+against your real comms menu. When it matches, turn on the second.
+
+| Say | What happens |
+|---|---|
+| "two rejoin" / "three rejoin" / "four rejoin" | That wingman rejoins formation |
+| "two engage bandits" | That wingman engages |
+| "flight rejoin" / "flight engage bandits" / "flight return to base" | The whole flight |
+| "awacs picture" | AWACS gives you the picture |
+| "bogey dope" | AWACS gives you a bogey dope |
+
+**It knows who is still flying.** Ask two to rejoin after two is shot down and it says
+*"two is not with you"* rather than pressing something. It also knows that DCS renumbers
+its wingman entries as aircraft are lost — with two gone, three moves up the menu — and
+works out the right key from who is actually left.
+
+**Keys are only sent while DCS is the active window.** Alt-tab away mid-command and the
+rest is dropped rather than typed into your browser.
+
+### Which aircraft work
+
+| Aircraft | State |
+|---|---|
+| F-15C | **Confirmed working** — presses keys |
+| A-10A, Su-25T, TF-51D | Not confirmed — **logs the keys but won't press them** |
+| Anything else | Not supported; says so by name |
+
+Comms menus differ between aircraft, so each needs its own list of key sequences. The
+three unconfirmed ones use a copy of the F-15C's, which is probably right — but "probably"
+isn't good enough to press keys with, so they stay in dry-run until someone checks.
+
+### The files you can edit
+
+```
+%LOCALAPPDATA%\ATCAI\keymaps\
+```
+
+Paste that into Explorer's address bar. One `.json` file per aircraft, plain text. They
+appear the first time you open the Comms Keys tab, and nothing you change there is ever
+overwritten by an update.
+
+**After editing any of them, press Stop then Start on the Talking to ATC tab.** That's
+all — no reinstalling, no rebuilding.
+
+**To change what you say:** find the command in the file and edit its `phrases` list.
+You only need one of "request" / "requesting" — both always work.
+
+**To confirm an aircraft so it will actually press keys:**
+
+1. Fly it with only **Listen for comms menu commands** on.
+2. Say each command. The Log tab shows `would press: A-10A: comms F7 F5`.
+3. Open your real comms menu and check it matches — **go by the labels, not the
+   F-numbers**, since the numbers shift depending on what's in the menu.
+4. Fix anything wrong in that aircraft's file.
+5. Change `"verified": false` to `"verified": true` near the top of the file.
+6. Stop and Start listening. Turn on **Actually press the keys**.
+
+If you ever want the original files back, **Use shipped maps** on the Comms Keys tab
+restores them (and loses your edits — it asks first).
+
+### If nothing happens
+
+Press **Test keys in Notepad** on the Comms Keys tab. It types `dcs` into Notepad
+instead of DCS. If that works but the cockpit doesn't react, the sequence is wrong rather
+than the keystrokes. If Notepad gets nothing either, Windows is refusing synthetic
+keystrokes on your machine and no key map will help.
+
+**One honest warning:** nothing confirms a command was carried out. DCS tells us only
+that the keystroke was accepted, so if a game update moves a menu entry, a command will
+appear to work in the log while doing something else. Spot-check after DCS patches.
+
 ## Settings
 
 The **Settings** tab has the few things worth changing — the radio frequencies ATC uses,
