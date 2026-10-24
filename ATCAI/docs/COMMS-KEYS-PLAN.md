@@ -1,7 +1,12 @@
 # Voice control of DCS's own comms menus — design plan
 
-**Status: proposed, not built.** Written for review before any code exists. Intended to
-live on a branch (`comms-keys`) that can be deleted without trace if it doesn't work out.
+**Status: Phases A and B done and verified in the cockpit, 2026-10-24. It works.**
+Sending keys is off by default and guarded. Phases C-D remain.
+
+**DCS accepts synthetic scan-code `SendInput`.** That was the question the whole branch
+rested on and no amount of design could answer. All eleven commands were confirmed end to
+end: the AWACS calls produced their replies, and all three wingmen acknowledged by radio
+and visibly changed formation.
 
 Goal: say *"Two, rejoin"* or *"AWACS, picture"* and have it happen, without taking a hand
 off the stick to dive through the comms menu.
@@ -113,9 +118,17 @@ One JSON file per aircraft, keyed by the exact DCS `typeName`:
 - Unknown aircraft means no map, which means the feature stays quiet for that airframe
   rather than guessing. The Manager says so.
 
-**The sequences above are placeholders.** Establishing the real trees per aircraft is part
-of the work, done with dry-run mode (below) rather than by firing keys and seeing what
-breaks.
+**The F-15C sequences were established this way and are now verified** (2026-10-24,
+walked through in the cockpit). Worth recording what that exercise showed: **every one of
+the originally guessed sequences was wrong.** AWACS is F7, not F6; picture is F5, not F1;
+flight rejoin is `F1 F9 F1`, not `F1 F1 F1`. Had Phase B been built first, each would
+have pressed something unintended. Dry-run before keystrokes earned its place.
+
+**Phrases live in the map too.** Each command carries a `phrases` list, so a player
+changes what they say by editing JSON rather than the source. They get the same
+`request`/`requesting` expansion ATC phrases do. A phrase claimed by two maps for
+different intents is reported rather than silently resolved, and an ATC request keeps its
+words if a map tries to claim them.
 
 ## Keystrokes: the mechanics that actually matter
 
@@ -172,23 +185,98 @@ is explicitly a fly-test, not a substitute for the above.
 
 ## Phases, and where the branch can be abandoned
 
-**A — State and dry run.** `atc_state.lua`, state tailing, map format, resolution,
-refusals, dry-run logging, tests. **No key is ever sent.** Zero risk to anything.
-*Decision point: does the bridge correctly know what aircraft, wingmen and AWACS you have,
-and pick sensibly?* If not, stop here having touched nothing.
+**A — State and dry run. DONE, pending a flight.** `atc_state.lua`, state tailing, map
+format, resolution, refusals, dry-run logging, tests. **No key is ever sent.** Zero risk
+to anything.
 
-**B — Prove keystrokes reach DCS.** Scancode `SendInput`, foreground guard, the Notepad
-test. One aircraft (F-15C), two commands (`awacs_picture`, `flight_rejoin`).
-*Decision point: do the keys land in the cockpit and do the right thing?* **This is where
-the branch lives or dies.** If DirectInput won't take synthetic input, delete the branch —
-the plan above is sound but the foundation isn't there, and no amount of design fixes it.
+Built: `lua/atc/atc_state.lua` (publishing aircraft, wingmen, onGround, awacs + range,
+tanker), `voice-bridge/atcai_keys.py` (state parsing, conditions, map loading,
+resolution, refusals, `DryRun`), `voice-bridge/keymaps/F-15C.json` (marked
+`"verified": false`), five voice intents under `flight_*`/`awacs_*` routed away from the
+mission inbox, a **Comms Keys** tab showing the dry run, and tests - including one
+asserting real key sending is *absent* rather than present-and-disabled, so Phase A
+cannot become Phase B by flipping a flag.
+
+*Decision point: does the bridge correctly know what aircraft, wingmen and AWACS you
+have, and pick sensibly?* **Passed, 2026-10-24.** Commands were heard and resolved, and
+the real sequences were read off the live menu and written into the map.
+
+**DCS renumbers the per-wingman entries by position, and that is handled.** Observed
+2026-10-24: with wingman two dead, three and four moved to **F2 and F3**, and the menu
+relabelled them "Wingman 2" and "Wingman 3" while the radio still called them Chevy 83
+and 84. The menu is purely positional; the aircraft keep their identity.
+
+A fixed key is therefore wrong the moment anyone dies. So per-wingman keys are **computed
+at resolution time** from the slots still alive: the map holds `"wingman": 3` and
+`"keys": ["comms", "{wingman}", "F9"]`, and `{wingman}` becomes `F2` when three is the
+first survivor. Everything needed was already being published, so no new detection was
+required - and DCS logs nothing at all about menu structure, so there was no other route.
+
+A sequence still containing a placeholder is refused rather than pressed, and a test
+walks every command in every map asserting none can escape with one.
+
+**Inferred from one observation.** The rule - position among survivors, F2 upwards - fits
+the intact flight and the two-dead case exactly. Three-dead and multiple-death orderings
+follow from the same rule but have not been watched happen. Worth confirming before
+Phase B presses anything.
+
+Added after that flight: **per-slot wingman commands.** "Two, rejoin" addresses slot 2
+specifically, so a count of surviving wingmen is not enough - with two dead and three
+alive the count is still 2, and a count-based check would send the sequence to an
+aircraft that no longer exists. `atc_state.lua` now publishes `slot2/slot3/slot4` from
+`Unit.getNumber()`, and the per-wingman commands require the specific slot. A module that
+won't report a number claims no slot, so the command refuses rather than guessing.
+
+**B — Prove keystrokes reach DCS. BUILT, pending a flight.** All eleven commands, not
+just two: the resolution work was shared, so restricting it bought nothing.
+
+Built: `voice-bridge/atcai_sendkeys.py` - Set 1 scan codes via `SendInput` with
+`KEYEVENTF_SCANCODE`, the extended-key flag for F11/F12, a case-insensitive key lookup,
+and the foreground guard. A **Send keys for real** switch separate from listening, both
+off by default, and a **Test keys in Notepad** button.
+
+The guard is the part that matters, so it is specified rather than implied:
+
+- Focus is checked immediately before the sequence **and again before every key**, so
+  alt-tabbing away part-way drops the remainder instead of delivering it elsewhere.
+- A focus that cannot be determined counts as **not DCS** - an unknown window is exactly
+  what must not be typed into.
+- A sequence containing a key we have no scan code for is refused whole, never partially.
+- One rejected keystroke stops the sequence, because carrying on would leave the menu
+  half-navigated and the next command would start from the wrong place.
+
+`atcai_keys.py` still touches no OS API at all - a test asserts the words `ctypes`,
+`SendInput`, `windll` and `WinDLL` appear nowhere in it. Decisions and the keypress stay
+in separate files so the dangerous part is one small readable module.
+
+*Decision point: do the keys land in the cockpit and do the right thing?* **Passed,
+2026-10-24.** Notepad received `dcs`, proving synthetic keystrokes work on the machine at
+all; then in the cockpit `awacs picture` (`F7 F5`) and `awacs bogey dope` (`F7 F4`)
+produced their radio replies, and `two rejoin` / `three rejoin` / `four rejoin` were
+acknowledged by radio with a visible formation change. The published state read
+`slots 2=1 3=1 4=1` throughout, so the keys chosen were the right ones for an intact
+flight. No scripting errors.
+
+The Notepad test earned its place by making the two possible failures separable, and is
+worth keeping for exactly that reason: if a future DCS patch breaks this, it tells you in
+ten seconds whether the problem is the input layer or the key map.
+
+Worth recording what DCS does **not** give us: nothing in `dcs.log` mentions AI tasking
+or comms-menu selections - searched, zero hits. So "the keystroke was accepted by
+Windows" is the most any log can confirm. That a wingman actually obeyed is only knowable
+by watching him, which is what makes Phase D more than a nicety.
 
 **C — Make it usable.** Manager tab, off-by-default wiring, maps for the modules you own,
 documentation including a plain statement that it can affect mission outcomes.
 
-**D — Optional, later.** Crude confirmation: after `flight_rejoin`, watch the wingman's
-heading and speed and report "acknowledged" if it changed. Read-only. Probably
-over-engineering, and the only honest way to close the loop.
+**D — Confirmation, and less optional than it looked.** After `flight_rejoin`, watch the
+wingman's heading and speed and report "acknowledged" if it changed. Read-only.
+
+Phase B's verification showed why this matters: DCS reports nothing about whether a
+command was obeyed, so `pressed:` in the log means only that Windows accepted the
+keystroke. Everything beyond that was confirmed by a human watching the formation. A
+heading check would be the only mechanism that could notice a sequence going stale after
+a DCS patch, rather than silently pressing the wrong thing.
 
 ## Experiments to run before writing much
 

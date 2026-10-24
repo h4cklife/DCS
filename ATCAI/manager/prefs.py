@@ -32,6 +32,8 @@ DEFAULTS = {
     "atis_enabled": True,
     "atis_auto_frequency": False,
     "atis_frequency": "380.000",
+    "comms_keys_enabled": False,
+    "send_keys_enabled": False,
 }
 
 # Guards against a hand-edited or corrupted file feeding nonsense into the GUI.
@@ -48,6 +50,8 @@ VALIDATORS = {
     "ptt_key_name": lambda v: isinstance(v, str) and v.strip() != "",
     "atis_enabled": lambda v: isinstance(v, bool),
     "atis_auto_frequency": lambda v: isinstance(v, bool),
+    "comms_keys_enabled": lambda v: isinstance(v, bool),
+    "send_keys_enabled": lambda v: isinstance(v, bool),
     "atis_frequency": lambda v: isinstance(v, str) and v.strip() != "",
 }
 

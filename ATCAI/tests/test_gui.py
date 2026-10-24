@@ -139,7 +139,7 @@ class TestTabLayout:
     def test_each_job_has_its_own_tab(self, gui):
         assert self._tab_names(gui) == [
             "Setup", "Talking to ATC", "Test Microphone", "Hearing ATC",
-            "Settings", "Log",
+            "Comms Keys", "Settings", "Log",
         ]
 
     def test_the_log_lives_in_a_tab_not_under_every_tab(self, gui):
@@ -151,6 +151,111 @@ class TestTabLayout:
         for name in ("listen_button", "speak_button", "mic_button", "mic_list_button",
                      "mic_settings_button", "log_view", "ptt_button"):
             assert hasattr(gui, name), "%s was lost in the split" % name
+
+
+class TestCommsKeysTab:
+    """Phase A: the tab exists to make the dry run visible, and must not be able to
+    press anything."""
+
+    def test_the_tab_exists(self, gui):
+        for name in ("comms_keys_enabled", "comms_aircraft", "comms_maps"):
+            assert hasattr(gui, name)
+
+    def test_it_is_off_by_default(self, gui):
+        """It works the game rather than reading it, so it opts in."""
+        assert gui.comms_keys_enabled.get() is False
+
+    def test_it_lists_the_maps_it_found(self, gui):
+        gui._refresh_comms_maps()
+        assert "F-15C" in gui.comms_maps.cget("text")
+
+    def test_it_says_which_maps_are_unverified(self, gui):
+        gui._refresh_comms_maps()
+        shown = gui.comms_maps.cget("text")
+        assert "unverified" in shown, "an unverified map must not look confirmed"
+
+    def test_it_names_the_folder_it_reads_from(self, gui):
+        """Two copies exist - inside the exe and in the player's folder - so which one
+        is in use must not be a mystery."""
+        gui._refresh_comms_maps()
+        assert "Reading from" in gui.comms_maps_path.cget("text")
+
+    def test_resetting_maps_asks_first(self, gui, monkeypatch):
+        """It discards the player's own edits, so it cannot happen on a stray click."""
+        import app
+        asked = []
+        monkeypatch.setattr(app.messagebox, "askyesno",
+                            lambda title, message: asked.append(message) or False)
+        called = []
+        monkeypatch.setattr(app.atcai_keys, "refresh_user_keymaps",
+                            lambda: called.append(1) or [])
+        gui._reset_comms_maps()
+        assert asked and "lost" in asked[0]
+        assert not called, "it reset without waiting for an answer"
+
+    def test_the_listener_is_told_whether_it_is_enabled(self, gui, monkeypatch):
+        import app
+        captured = {}
+        monkeypatch.setattr(app.atcai_listen, "run",
+                            lambda options, on_log=None, should_stop=None:
+                            captured.update(vars(options)))
+
+        gui.comms_keys_enabled.set(False)
+        gui._run_listener(None, lambda m: None, lambda: True)
+        assert captured["comms_keys"] is False
+
+        gui.comms_keys_enabled.set(True)
+        gui._run_listener(None, lambda m: None, lambda: True)
+        assert captured["comms_keys"] is True
+
+
+class TestSendKeysControls:
+    """Pressing keys is a separate opt-in from listening for the commands."""
+
+    def test_both_switches_default_to_off(self, gui):
+        assert gui.comms_keys_enabled.get() is False
+        assert gui.send_keys_enabled.get() is False
+
+    def test_the_listener_is_told_both_settings(self, gui, monkeypatch):
+        import app
+        captured = {}
+        monkeypatch.setattr(app.atcai_listen, "run",
+                            lambda options, on_log=None, should_stop=None:
+                            captured.update(vars(options)))
+
+        gui.comms_keys_enabled.set(True)
+        gui.send_keys_enabled.set(False)
+        gui._run_listener(None, lambda m: None, lambda: True)
+        assert captured["comms_keys"] is True and captured["send_keys"] is False
+
+        gui.send_keys_enabled.set(True)
+        gui._run_listener(None, lambda m: None, lambda: True)
+        assert captured["send_keys"] is True
+
+    def test_turning_on_real_sending_says_so(self, gui):
+        gui.send_keys_enabled.set(True)
+        gui._on_send_keys_toggled()
+        gui._drain()
+        assert "PRESSED" in gui.log_view.get("1.0", "end")
+
+    def test_turning_it_off_says_so_too(self, gui):
+        gui.send_keys_enabled.set(False)
+        gui._on_send_keys_toggled()
+        gui._drain()
+        assert "dry run" in gui.log_view.get("1.0", "end")
+
+    def test_a_successful_key_test_is_reported(self, gui):
+        gui._on_mic_event("KEYTEST", (True, "notepad.exe", None))
+        gui._drain()
+        assert "arrived" in gui.keys_focus.cget("text")
+        assert "synthetic" in gui.log_view.get("1.0", "end")
+
+    def test_a_failed_key_test_names_what_was_focused(self, gui):
+        """Separating "keys do not work" from "the map is wrong"."""
+        gui._on_mic_event("KEYTEST", (False, "chrome.exe", "DCS is not the active window"))
+        gui._drain()
+        assert "nothing sent" in gui.keys_focus.cget("text")
+        assert "chrome.exe" in gui.log_view.get("1.0", "end")
 
 
 class TestSettingsShowTheirValues:

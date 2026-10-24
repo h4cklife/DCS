@@ -32,14 +32,27 @@ class TestPhraseCoverage:
                 assert lookup.get(twin) == intent, "%r has no counterpart %r" % (phrase, twin)
 
     def test_every_intent_is_reachable(self, lookup):
-        assert sorted(set(lookup.values())) == sorted(listen.INTENT_PHRASES)
+        """Both halves: ATC requests from the source, comms commands from the key maps.
+        An intent in neither would be defined and unsayable."""
+        import atcai_keys
+        expected = set(listen.INTENT_PHRASES) | atcai_keys.comms_intents()
+        assert expected, "nothing to check - the sets were both empty"
+        assert sorted(set(lookup.values())) == sorted(expected)
 
     def test_intents_match_what_the_mission_understands(self, repo_root):
-        """An intent the Lua side doesn't know would be silently ignored in game."""
+        """An intent the Lua side doesn't know would be silently ignored in game.
+
+        Comms-menu intents are excluded on purpose: they are handled outside the sim by
+        pressing keys, and nothing in the mission can act on them. test_keys.py asserts
+        the other half - that they are absent from the Lua map rather than forgotten.
+        """
         lua = (repo_root / "lua" / "atc" / "atc_inbox.lua").read_text(encoding="utf-8")
         block = lua.split("INTENT_HANDLERS = {", 1)[1].split("}", 1)[0]
         import re
-        assert set(re.findall(r"^\s+(\w+)\s*=", block, re.M)) == set(listen.INTENT_PHRASES)
+        atc_intents = {i for i in listen.INTENT_PHRASES
+                       if not listen.is_comms_intent(i)}
+        assert set(re.findall(r"^\s+(\w+)\s*=", block, re.M)) == atc_intents
+        assert atc_intents, "the ATC intents must not all have been filtered away"
 
     def test_expansion_is_idempotent(self):
         once = listen.expand_phrases(["request taxi"])

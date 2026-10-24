@@ -1,7 +1,7 @@
 # ATCAI — architecture and decisions
 
 How ATCAI is built and why it's built that way. Written after the fact: everything here
-describes what exists and ships in v1.3.0, not what is planned.
+describes what exists and ships in v1.4.0, not what is planned.
 
 For the feature-by-feature state of the project see the status table in
 [README.md](../README.md). For the manager app specifically see

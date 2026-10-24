@@ -1,5 +1,49 @@
 # Changelog
 
+## 1.4.0 - 2026-10-24
+
+### For players
+
+- **Talk to your wingmen and to AWACS.** Say "two rejoin", "three engage bandits",
+  "flight return to base", "awacs picture" or "bogey dope" and ATCAI works DCS's own
+  comms menu for you. Eleven commands for the F-15C.
+
+  This is different from everything else ATCAI does: it **presses keys in the game**
+  rather than only reading it, so it can change what your flight does. It is **off by
+  default**, behind two separate switches on the new **Comms Keys** tab — one to listen
+  for the commands, another to actually send them.
+
+- **Keys are only ever sent while DCS is the active window.** Alt-tab away mid-command
+  and the rest of the sequence is dropped rather than typed into your browser.
+
+- **It knows who is still flying.** "Two rejoin" is refused with *"two is not with you"*
+  if two is gone. And because DCS renumbers its wingman menu entries by position among
+  the survivors — with two dead, three moves to F2 — the key is worked out from who is
+  actually left, not assumed.
+
+- **A Test keys in Notepad button**, which types into Notepad instead of DCS. If nothing
+  arrives there, Windows is refusing synthetic keystrokes and no key map will help —
+  worth knowing separately from a wrong sequence.
+
+- **What you say is yours to change.** Each command's phrases live in a plain text file
+  under `%LOCALAPPDATA%\ATCAI\keymaps\`, put there the first time you open the Comms
+  Keys tab. Edit the phrases, restart listening, done — and your edits are never
+  overwritten by an update.
+
+- **Maps for all four stock modules** — F-15C, A-10A, Su-25T, TF-51D. Only the F-15C has
+  been flown; the others are copies of it, so they **dry-run only and refuse to press
+  anything** until you've checked them against the real menu and marked them verified.
+  An aircraft with no map is refused by name rather than guessed at.
+
+### Known limitations
+
+- Only the F-15C is verified. The other three ship unverified and cannot press keys
+  until you confirm them. Menu trees differ per module, so each needs its own map.
+- Nothing confirms a command was carried out. DCS reports nothing about AI tasking or
+  comms selections, so the log can only say the keystroke was accepted by Windows.
+- A DCS patch that moves menu entries would need the map updating.
+- Multiplayer is unaffected — this cannot command other humans.
+
 ## 1.3.0 - 2026-09-23
 
 ### For players

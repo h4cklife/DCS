@@ -30,6 +30,7 @@ SCRIPT_FILES = (
     "atc_atis.lua",
     "atc_menu.lua",
     "atc_inbox.lua",
+    "atc_state.lua",
 )
 HOOK_FILE = "atcai_autoload.lua"
 DISABLED_SUFFIX = ".disabled"

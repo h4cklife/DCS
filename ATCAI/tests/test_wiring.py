@@ -66,8 +66,26 @@ class TestIntents:
         missing = set(handlers.values()) - defined_functions(core)
         assert not missing, "intents map to undefined functions: %s" % sorted(missing)
 
-    def test_every_spoken_intent_is_mapped(self, handlers):
-        assert set(listen.INTENT_PHRASES) == set(handlers)
+    def test_every_spoken_atc_intent_is_mapped(self, handlers):
+        """Comms-menu intents are handled outside the mission, so they are excluded -
+        but every ATC request must still reach a handler, and the filter must not
+        quietly empty the set."""
+        atc_intents = {i for i in listen.INTENT_PHRASES
+                       if not listen.is_comms_intent(i)}
+        assert atc_intents, "filtered everything away - the invariant would be vacuous"
+        assert atc_intents == set(handlers)
+
+    def test_comms_intents_are_deliberately_absent_from_the_mission(self, handlers):
+        for intent in listen.INTENT_PHRASES:
+            if listen.is_comms_intent(intent):
+                assert intent not in handlers
+
+    def test_comms_intents_have_phrases_too(self):
+        """A comms intent with no phrasing could never be triggered by voice, which is
+        its only route - there is no menu entry for these."""
+        for intent in listen.INTENT_PHRASES:
+            if listen.is_comms_intent(intent):
+                assert listen.INTENT_PHRASES[intent], "%s has no phrases" % intent
 
     def test_no_intent_is_silently_unspeakable(self, handlers):
         """A handler in the map with no phrases can only ever be reached by menu."""
@@ -134,6 +152,49 @@ class TestConfigDefaults:
         import installer
         unknown = set(installer.CONFIG_DEFAULTS) - set(installer.CONFIG_FIELDS)
         assert not unknown, "defaults for settings that don't exist: %s" % sorted(unknown)
+
+
+class TestKeymapPackaging:
+    def test_the_keymaps_directory_is_bundled(self):
+        """Maps missing from the exe would make comms commands refuse for every
+        aircraft - a failure that only appears in the built app."""
+        import importlib.util
+        spec = importlib.util.spec_from_file_location(
+            "build_exe", ROOT / "manager" / "build_exe.py")
+        build_exe = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(build_exe)
+
+        bundled = {str(src) for src, _ in build_exe.BUNDLED}
+        assert str(ROOT / "voice-bridge" / "keymaps") in bundled
+
+
+class TestTestHarnessStaysOut:
+    """tools/test_kill_wingman.lua destroys units - the one thing ATCAI never does. It
+    must not be able to reach a player's install."""
+
+    def test_it_is_not_installed_with_the_module(self):
+        import installer
+        assert "test_kill_wingman.lua" not in installer.SCRIPT_FILES
+        assert "kill_wingman.lua" not in installer.SCRIPT_FILES
+
+    def test_it_is_not_loaded_by_the_hook(self):
+        hook = (ROOT / "lua" / "hooks" / "atcai_autoload.lua").read_text(
+            encoding="utf-8")
+        assert "kill_wingman" not in hook
+
+    def test_it_is_not_bundled_into_the_exe(self):
+        import importlib.util
+        spec = importlib.util.spec_from_file_location(
+            "build_exe", ROOT / "manager" / "build_exe.py")
+        build_exe = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(build_exe)
+        for source, _ in build_exe.BUNDLED:
+            assert "kill_wingman" not in str(source)
+
+    def test_it_lives_outside_the_module_source(self):
+        """In tools/, not lua/atc/, so it cannot be mistaken for part of ATCAI."""
+        assert (ROOT / "tools" / "test_kill_wingman.lua").is_file()
+        assert not (ROOT / "lua" / "atc" / "test_kill_wingman.lua").exists()
 
 
 class TestPriority:

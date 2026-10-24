@@ -4,7 +4,7 @@
 [![Latest release](https://img.shields.io/github/v/release/h4cklife/DCS?filter=atcai-v*&label=release)](https://github.com/h4cklife/DCS/releases)
 [![Downloads](https://img.shields.io/github/downloads/h4cklife/DCS/total?label=downloads)](https://github.com/h4cklife/DCS/releases)
 [![Licence](https://img.shields.io/github/license/h4cklife/DCS)](../LICENSE)
-[![Tests](https://img.shields.io/badge/tests-327-brightgreen)](#tests)
+[![Tests](https://img.shields.io/badge/tests-454-brightgreen)](#tests)
 ![Platform](https://img.shields.io/badge/platform-Windows-0078d4?logo=windows)
 ![DCS World](https://img.shields.io/badge/DCS%20World-single--player-2ea44f)
 ![Python](https://img.shields.io/badge/python-3.12%2B-3776ab?logo=python&logoColor=white)
@@ -47,6 +47,7 @@ and roadmap.
 | 14 | Verify traffic awareness in flight | **Done** — flown against `--traffic` AI using the player's field |
 | 15 | Emergency and divert handling — mayday, vectors home, straight-in | **Done** — verified in-game |
 | 16 | Microphone diagnostics and a manager split into one-job tabs | **Done** — reviewed in the app |
+| 17 | Voice control of DCS's own comms menus — wingmen, AWACS | **Done** — verified in-game; off by default, see [docs/COMMS-KEYS-PLAN.md](docs/COMMS-KEYS-PLAN.md) |
 
 ATCAI loads into **every mission you fly** — stock missions, Instant Action, campaigns —
 with no mission editing at all. See Install.
@@ -423,6 +424,121 @@ Every helper process (the speech recogniser, Windows text-to-speech, SRS) is lau
 with `CREATE_NO_WINDOW`. Without it Windows pops a console over the game for each
 spoken reply, which is unusable in a full-screen sim.
 
+## Wingman and AWACS commands (comms-menu keys)
+
+Your wingmen and AWACS belong to DCS, not to ATCAI. Mission scripting cannot reach their
+comms menus — there is no API for it — so the only route is **pressing the keys**, which
+the voice bridge does from outside the sim.
+
+This is the one part of ATCAI that writes to the game rather than only reading it. It is
+off by default behind two switches on the manager's **Comms Keys** tab.
+
+### Which file am I editing? (read this first)
+
+**Every key map exists twice**, and this is the single most confusing thing in the
+project:
+
+| Copy | Path | Who edits it | Takes effect |
+|---|---|---|---|
+| **Source** | `voice-bridge/keymaps/<aircraft>.json` | you, the developer | **only after `python manager/build_exe.py`** |
+| **Runtime** | `%LOCALAPPDATA%\ATCAI\keymaps\<aircraft>.json` | players | on restarting listening |
+
+The source copy is **compiled into `ATCAI-Manager.exe`**. The running app copies it out
+to the runtime folder on first use and reads it **from there** — so editing the source
+and not rebuilding changes nothing, and that is the trap to watch for.
+
+**The Comms Keys tab tells you which folder is in use**, and warns in amber when the two
+differ. **Use shipped maps** overwrites the runtime copies with the build's (it asks
+first — it discards player edits).
+
+### Do I need to rebuild the exe?
+
+| What you changed | Rebuild needed? |
+|---|---|
+| A key map under `voice-bridge/keymaps/` | **Yes** |
+| `voice-bridge/*.py` (bridge, keys, sender) | **Yes** |
+| `manager/*.py` | **Yes** |
+| `lua/atc/*.lua` | No — but **reinstall the scripts** from the Setup tab |
+| A map under `%LOCALAPPDATA%\ATCAI\keymaps\` | No — restart listening |
+
+```
+python manager/build_exe.py        # close the Manager first, or it cannot be replaced
+```
+
+### Verifying an aircraft
+
+A map's sequences are guesswork until someone has walked the menu, so **an unverified map
+can dry-run but will refuse to press anything**. That is enforced in code, not just
+documented. The F-15C is verified; A-10A, Su-25T and TF-51D ship as copies of it and are
+not.
+
+To verify one:
+
+1. Comms Keys tab: turn on **Listen for comms menu commands**. Leave **Actually press
+   the keys** off.
+2. Fly that aircraft. Say each command. The **Log** tab shows
+   `would press: A-10A: comms F7 F5`.
+3. Open the real comms menu and compare, **going by the labels, not the F-numbers**.
+4. Fix anything wrong in `voice-bridge/keymaps/<aircraft>.json`, set
+   `"verified": true`, and rebuild.
+5. Turn on **Actually press the keys**, restart listening, and it will send them.
+
+### What a map looks like
+
+```json
+"wingman3_rejoin": {
+  "wingman": 3,
+  "keys": ["comms", "{wingman}", "F9"],
+  "requires": ["slot3"],
+  "refusal": "three is not with you",
+  "phrases": ["three rejoin", "three rejoin formation"]
+}
+```
+
+- **`keys`** — the sequence. `comms` means the menu key itself, from the map's
+  `comms_key`. Function keys are sent as Set 1 scan codes, because DCS reads DirectInput
+  and commonly ignores virtual-key input.
+- **`{wingman}`** — filled in *when you speak*, never stored. DCS numbers its per-wingman
+  entries **by position among the survivors**: with two dead, three moves to F2. A fixed
+  key would address the wrong aircraft after any loss.
+- **`requires`** — conditions checked against what the mission publishes
+  (`wingmen>=1`, `slot3`, `awacs`, `onGround==0`). Unmet means refused, with `refusal`
+  as the spoken reason. An absent field is false, never assumed.
+- **`phrases`** — what you say. `request`/`requesting` and `declare`/`declaring` are
+  expanded automatically, so list one form only.
+
+### How it knows the situation
+
+`lua/atc/atc_state.lua` publishes one line to `dcs.log` every five seconds, which the
+bridge tails:
+
+```
+ATCAI_STATE|aircraft=F-15C|wingmen=3|onGround=0|awacs=1|awacsnm=42|tanker=1|slot2=1|slot3=1|slot4=1
+```
+
+Read-only, like the rest of the Lua. It exists because the comms menu cannot be read but
+everything that shapes it can be.
+
+### The foreground guard
+
+Keys go to whatever window has focus, so **nothing is sent unless DCS is the active
+window**. Focus is rechecked before every key, so alt-tabbing away mid-command drops the
+remainder rather than typing it into a browser. A focus that cannot be identified counts
+as not-DCS.
+
+**Test keys in Notepad** types `dcs` into Notepad instead. If that works but the cockpit
+does not react, the sequence is wrong; if Notepad gets nothing, Windows is refusing
+synthetic keystrokes and no map will help.
+
+### What nothing can tell you
+
+DCS reports nothing about AI tasking or comms selections — `dcs.log` has no record of
+either. So `pressed:` in the log means Windows accepted the keystroke, **not** that the
+wingman obeyed. If a DCS patch moves a menu entry, a command will look fine in the log
+while doing something else, so spot-check after game updates.
+
+See [docs/COMMS-KEYS-PLAN.md](docs/COMMS-KEYS-PLAN.md) for how this was built and why.
+
 ## Spoken ATC replies (SRS TTS)
 
 ATC replies can be spoken over the radio instead of only appearing as on-screen text,
@@ -615,14 +731,16 @@ ATCAI/
 ├── CHANGELOG.md            what changed, written for players
 ├── docs/
 │   ├── PLAN.md             architecture, and why it's built this way
-│   └── INSTALLER-PLAN.md   how the manager app came about
+│   ├── INSTALLER-PLAN.md   how the manager app came about
+│   └── COMMS-KEYS-PLAN.md  wingman/AWACS commands: how and why
 ├── lua/atc/                the ATC itself, loaded into every mission
 │   ├── atc_config.lua      applies user settings over script defaults
 │   ├── atc_core.lua        phases, phraseology, wind/runway/weather logic
 │   ├── atc_traffic.lua     who else is using the runway
 │   ├── atc_atis.lua        the repeating airfield information broadcast
 │   ├── atc_menu.lua        comms menu + player registry
-│   └── atc_inbox.lua       polls the voice inbox file via dofile
+│   ├── atc_inbox.lua       polls the voice inbox file via dofile
+│   └── atc_state.lua       publishes aircraft/wingmen/AWACS, for comms-menu keys
 ├── lua/hooks/
 │   └── atcai_autoload.lua  loads all of the above into every mission
 ├── manager/                the app users run
@@ -633,12 +751,22 @@ ATCAI/
 ├── voice-bridge/
 │   ├── atcai_listen.py     speech recognition -> the mission's inbox
 │   ├── recognize.ps1       the Windows recogniser itself
-│   └── atcai_tts.py        dcs.log -> spoken replies (SRS or local audio)
+│   ├── mictest.ps1         microphone diagnostic: device, level, rejections
+│   ├── atcai_mictest.py    drives mictest.ps1 for the manager
+│   ├── atcai_tts.py        dcs.log -> spoken replies (SRS or local audio)
+│   ├── atcai_keys.py       decides which comms-menu keys a command means
+│   ├── atcai_sendkeys.py   the only file that presses keys. Scan codes + the
+│   │                       foreground guard, kept small enough to read in full
+│   └── keymaps/            one JSON per aircraft: sequences, conditions, phrases
+│                           (SOURCE copies — compiled into the exe; see above)
 ├── tests/                  pytest: installer, prefs, voice bridge, GUI, and the
 │                           Lua suites run on DCS's own interpreter
 └── tools/
     ├── run_tests.sh        runs everything
     ├── test_*.lua          the Lua suites themselves
+    ├── test_kill_wingman.lua   TEST HARNESS ONLY: destroys a chosen wingman on
+    │                           demand, to exercise how DCS renumbers its menu.
+    │                           Never installed with the module
     └── build_test_mission.py   makes a .miz carrying ATCAI, and can add AI
                                 traffic and ground targets for testing
 ```
