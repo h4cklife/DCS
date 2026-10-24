@@ -1,7 +1,8 @@
 # ATCAI — architecture and decisions
 
-How ATCAI is built and why it's built that way. Written after the fact: everything here
-describes what exists and ships in v1.3.0, not what is planned.
+How ATCAI is built and why it's built that way. Written after the fact: the bulk of it
+describes what exists and ships in v1.3.0. Two sections near the end look forward - what
+is worth building next, and what is possible but deliberately left alone.
 
 For the feature-by-feature state of the project see the status table in
 [README.md](../README.md). For the manager app specifically see
@@ -286,6 +287,83 @@ open that fails when the device is in use).
 
 If route 1 holds, this is small. If it doesn't, route 2 works but costs the grammar.
 Either way it no longer needs NAudio, a bundled DLL, or a blocking stream.
+
+## Possible, and deliberately not done
+
+> **Warning.** Everything in this section is achievable with the mission scripting API
+> and would break the guarantee the whole design rests on. None of it is planned. It is
+> recorded so the option isn't forgotten, and so anyone who reaches for it - including a
+> future me - meets the reasoning before the code.
+
+**The guarantee being protected: ATCAI is read-only.** Every DCS API it touches is a
+read, with three exceptions - it writes text to the player's own screen
+(`outTextForGroup`), adds its own comms-menu entries (`missionCommands.add*`), and writes
+to `dcs.log` (`env.info`). It never commands a unit, spawns anything, or changes mission
+state.
+
+That is why the Hook can load it into **every** mission with no per-mission setup and no
+risk: a stock mission, someone else's custom mission and a campaign you have forty hours
+invested in all behave exactly as they would without it. The moment ATCAI writes to the
+mission world, that stops being true, and it becomes something you would want to disable
+before flying anything you care about.
+
+### What it could do
+
+- **Command AI aircraft.** `Group.getController()` plus `Controller.pushTask()` /
+  `setTask()` can order AI to orbit, hold short, go around or change heading. This is the
+  obvious "make ATC real" feature: instructions that actually move traffic rather than
+  sequencing the player around traffic that cannot hear him.
+- **Spawn aircraft or vehicles**, via `coalition.addGroup` - ATC traffic conjured on
+  demand rather than relying on whatever the mission already contains.
+- **Set mission flags**, via `trigger.action.setUserFlag`. The most far-reaching of the
+  four: campaign and mission logic runs on flags and triggers, so this reaches directly
+  into a mission's own state machine.
+- **Place smoke, flares, explosions and F10 map marks**, and play audio on a frequency
+  with `trigger.action.radioTransmission`.
+
+### Why each is dangerous
+
+- **Commanding AI breaks missions.** Campaign flights carry scripted tasking. Ordering a
+  strike package to orbit so the player can land may mean it never reaches its target,
+  and the mission's own success conditions never fire. The player would experience that
+  as the campaign being broken, with no obvious connection to ATC.
+- **AI tasking does not round-trip.** `pushTask`/`popTask` helps, but DCS route state
+  cannot be reliably saved and restored, so "hold, then carry on as you were" is not a
+  thing that can be promised.
+- **DCS ground AI fights external commands.** Its taxi and runway handling is engine-side
+  and famously stubborn; this is a known sharp edge rather than a theoretical risk.
+- **Setting flags is indistinguishable from the mission setting them.** A flag written by
+  ATCAI can trip a trigger the mission author wrote, in a mission ATCAI knows nothing
+  about. There is no safe generic flag range.
+- **None of it works on human clients** in multiplayer, which is out of scope anyway but
+  worth knowing before designing around it.
+
+### What is not possible at any price
+
+- **The built-in ATC.** DCS's own ATC lives in the simulation engine, not in the
+  scripting sandbox. Its transmissions cannot be suppressed, rewritten, intercepted or
+  disabled per airfield, and `missionCommands` can only add entries under "Other" - which
+  is why ATCAI sits at F10 -> Other -> ATCAI rather than replacing the F5 entry. Two
+  controllers therefore run in parallel with no knowledge of each other and can
+  contradict each other. Worth remembering when a player reports DCS ATC refusing a
+  takeoff clearance ATCAI just granted: that is the engine's own runway logic, invisible
+  to us and beyond our influence.
+- **The player's own aircraft** - radios, autopilot, systems. The scripting API does not
+  reach into the cockpit.
+- **Another client's state**, in multiplayer.
+- **The mission file itself**, mid-flight.
+
+### If it is ever attempted anyway
+
+Scope it so the read-only guarantee survives for everyone who hasn't opted in:
+
+1. **Off by default**, with a clearly-worded setting - not a silent behaviour change.
+2. **Only aircraft ATCAI itself spawned**, or missions explicitly marked as opting in.
+   Never arbitrary AI belonging to a mission ATCAI did not write.
+3. **Never write flags.** The blast radius is a mission author's own logic, and there is
+   no way to know what a given flag means.
+4. Say plainly in the player documentation that it can affect mission outcomes, so
+   turning it off before a campaign is an informed choice rather than a discovery.
 
 ## Still open
 

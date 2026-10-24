@@ -200,6 +200,17 @@ loud, too much background noise — and shows a level bar so you can see sound a
 
 Stop listening before testing; only one thing can hold the microphone at a time.
 
+**DCS's own ATC contradicts ATCAI — it says "unable" right after ATCAI cleared me.**
+Expected, and nothing to be done about it. DCS's built-in ATC is part of the game engine
+and can't be altered or silenced by an addon, so the two controllers run side by side
+with no knowledge of each other. If it's only happening when you use the **F5 ATC** menu
+as well, stick to one or the other and the double-talk stops.
+
+Worth knowing alongside it: ATCAI never gives orders to AI aircraft. When it sequences
+you behind traffic, that traffic carries on exactly as the mission told it to. ATCAI
+advises you; it doesn't move anyone else. That's deliberate — it's why the module is safe
+to leave installed for every mission and campaign you fly.
+
 **It hears me on a headset but not through speakers.**
 With speakers, the game and ATC's own voice go back into your microphone, and the
 recogniser has to pick you out of all of it. Run **Test microphone** while the game is

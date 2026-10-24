@@ -54,8 +54,7 @@ with no mission editing at all. See Install.
 ## What works right now
 
 Once loaded into a mission (see Install), spawn into a player-controlled aircraft parked
-at an airbase. Open the comms menu (`\` by default) and navigate **F10 (Other...) →
-F1 (ATCAI)** for:
+at an airbase. Open the comms menu (`\` by default) and find **Other... → ATCAI** for:
 
 - **Request radio check** — ATC confirms it hears you.
 - **Request airfield information** — a spoken ATIS: information letter, time, runway in
@@ -285,8 +284,10 @@ In `lua/atc/atc_traffic.lua`, if ATC is too cautious or not cautious enough:
    should see an on-screen **"ATCAI ready"** message.
 2. Once control is handed to you, press **`\`** to open the comms menu (not the F10 key —
    that's the map view).
-3. Navigate **F10 (Other...) → F1 (ATCAI)**. Custom mission menus always live under the
-   "Other" submenu, not at the top level. Don't confuse this with the stock **ATC**
+3. Navigate **Other... → ATCAI**. Custom mission menus always live under the "Other"
+   submenu, not at the top level. **Go by the labels, not the numbers** — the F-keys
+   just index whatever happens to be on that page, so if the mission registers menus of
+   its own, ATCAI won't be the first entry. Don't confuse this with the stock **ATC**
    entry on the main comms list — that's a built-in DCS feature (airport list,
    frequencies, "Request Start-Up") and unrelated to this project.
 4. Press the number for the option you want to try — this sends the request and closes
@@ -561,6 +562,15 @@ change.
 
 ## Known limitations
 
+- **ATCAI never commands anything.** It reads the mission world and talks to you; it
+  issues no orders to AI aircraft. Sequencing you behind traffic does not move that
+  traffic — the aircraft ahead has no idea ATCAI exists. This is deliberate, and it's
+  what makes the module safe to load into every mission including campaigns. See
+  *Possible, and deliberately not done* in [docs/PLAN.md](docs/PLAN.md).
+- **DCS's own ATC is untouchable.** It lives in the sim engine, not the scripting
+  sandbox, so its transmissions can't be suppressed or altered. Both controllers run in
+  parallel and can contradict each other — DCS may refuse a takeoff clearance ATCAI has
+  just granted, and neither can see the other.
 - Airbase detection is proximity-only — no concept of which parking spot you're in, and
   no disambiguation if two fields are both in range.
 - **Clearances aren't coalition-checked.** Diverts and vectors are — they only ever offer
