@@ -26,13 +26,15 @@ sys.path.insert(0, str(HERE.parent / "voice-bridge"))
 
 import installer  # noqa: E402
 import prefs  # noqa: E402
+import single_instance  # noqa: E402
 import atcai_listen  # noqa: E402
 import atcai_tts  # noqa: E402
 import atcai_mictest  # noqa: E402
+import atcai_micselect  # noqa: E402
 import atcai_keys  # noqa: E402
 import atcai_sendkeys  # noqa: E402
 
-VERSION = "1.4.0"
+VERSION = "1.5.0"
 PAD = 8
 
 
@@ -223,32 +225,46 @@ class App(ttk.Frame):
                                               command=self._open_sound_settings)
         self.mic_settings_button.grid(row=0, column=2, sticky="w", padx=(PAD, 0))
 
+        chooser = ttk.Frame(mic)
+        chooser.grid(row=1, column=0, columnspan=2, sticky="ew", pady=(PAD, 0))
+        ttk.Label(chooser, text="Use this microphone:").grid(row=0, column=0, sticky="w")
+        self.mic_choice = ttk.Combobox(chooser, state="readonly", width=44)
+        self.mic_choice.grid(row=0, column=1, sticky="w", padx=(PAD, 0))
+        self.mic_choice.bind("<<ComboboxSelected>>", lambda _: self._choose_microphone())
+        ttk.Button(chooser, text="Refresh", command=self._refresh_microphones
+                   ).grid(row=0, column=2, sticky="w", padx=(PAD, 0))
+
+        ttk.Label(mic, wraplength=700, justify="left", foreground="#555", text=(
+            "This sets the microphone for speech programs only - Windows' own default "
+            "recording device is left alone, so Discord, SRS and everything else are "
+            "unaffected. Restart listening after changing it."
+        )).grid(row=2, column=0, columnspan=2, sticky="w")
+
         self.mic_device = ttk.Label(mic, text="Press to check what ATCAI can hear.",
                                     foreground="#555", wraplength=700, justify="left")
-        self.mic_device.grid(row=1, column=0, columnspan=2, sticky="w", pady=(PAD, 0))
+        self.mic_device.grid(row=3, column=0, columnspan=2, sticky="w", pady=(PAD, 0))
         self.mic_inputs = ttk.Label(mic, text="", foreground="#555", wraplength=700,
                                     justify="left")
-        self.mic_inputs.grid(row=2, column=0, columnspan=2, sticky="w")
+        self.mic_inputs.grid(row=4, column=0, columnspan=2, sticky="w")
 
-        ttk.Label(mic, text="Input level:").grid(row=3, column=0, sticky="w",
+        ttk.Label(mic, text="Input level:").grid(row=5, column=0, sticky="w",
                                                  pady=(PAD, 0))
         self.mic_level = tk.IntVar(value=0)
         ttk.Progressbar(mic, orient="horizontal", length=240, mode="determinate",
                         maximum=100, variable=self.mic_level
-                        ).grid(row=3, column=1, sticky="w", pady=(PAD, 0))
+                        ).grid(row=5, column=1, sticky="w", pady=(PAD, 0))
 
         self.mic_results = tk.Text(mic, height=8, wrap="word", state="disabled")
-        self.mic_results.grid(row=4, column=0, columnspan=2, sticky="ew", pady=(PAD, 0))
+        self.mic_results.grid(row=6, column=0, columnspan=2, sticky="ew", pady=(PAD, 0))
 
         ttk.Label(mic, wraplength=700, justify="left", foreground="#555", text=(
             "Runs for 15 seconds. Say a request you would use in the air, like "
-            '"Chevy 81, requesting taxi". It reports which microphone Windows gave '
-            "ATCAI, whether any sound is arriving, and what it heard - including "
-            "anything it heard but could not match, which is invisible while flying.\n"
-            "ATCAI cannot choose the microphone - Windows does. If the wrong one is "
-            "marked in use, change it under Recording in Windows sound settings, then "
-            "test again."
-        )).grid(row=5, column=0, columnspan=2, sticky="w", pady=(4, 0))
+            '"Chevy 81, requesting taxi". It reports which microphone is in use, '
+            "whether any sound is arriving, and what it heard - including anything it "
+            "heard but could not match, which is invisible while flying."
+        )).grid(row=7, column=0, columnspan=2, sticky="w", pady=(4, 0))
+
+        self._refresh_microphones()
 
     def _build_hearing(self, tabs):
         tab = ttk.Frame(tabs, padding=PAD)
@@ -886,6 +902,54 @@ class App(ttk.Frame):
         self._mic_thread = threading.Thread(target=work, daemon=True)
         self._mic_thread.start()
 
+    def _refresh_microphones(self):
+        """Fill the chooser from SAPI's device list, marking the current selection."""
+        def work():
+            try:
+                current, resolved, devices = atcai_micselect.list_devices()
+            except Exception as exc:                      # never take the GUI down
+                self.mic_events.put(("MICLIST", (None, None, [], repr(exc))))
+                return
+            self.mic_events.put(("MICLIST", (current, resolved, devices, None)))
+
+        threading.Thread(target=work, daemon=True).start()
+
+    def _show_microphone_choices(self, current, resolved, devices, error):
+        if error:
+            self._enqueue("voice", "could not list microphones: %s" % error)
+            return
+
+        self._mic_devices = devices
+        following = ("Windows default (%s)" % resolved) if resolved else "Windows default"
+        labels = [following] + [name for _, name in devices]
+        self.mic_choice.config(values=labels)
+
+        # An explicit choice is shown as itself; following Windows is shown as such,
+        # with what it currently resolves to, so the two are never confused.
+        if current and current != atcai_micselect.WINDOWS_DEFAULT:
+            chosen = atcai_micselect.name_for(current, devices)
+            self.mic_choice.set(chosen if chosen in labels else following)
+        else:
+            self.mic_choice.set(following)
+
+    def _choose_microphone(self):
+        index = self.mic_choice.current()
+        devices = getattr(self, "_mic_devices", [])
+
+        if index <= 0:
+            token, label = atcai_micselect.WINDOWS_DEFAULT, "the Windows default"
+        else:
+            try:
+                token, label = devices[index - 1]
+            except IndexError:
+                return
+
+        def work():
+            ok, message = atcai_micselect.select(token)
+            self.mic_events.put(("MICSET", (ok, label, message)))
+
+        threading.Thread(target=work, daemon=True).start()
+
     def _refresh_inputs(self):
         """List the active recording devices. Safe while listening - it never opens
         the microphone, it only asks Windows what exists."""
@@ -966,6 +1030,16 @@ class App(ttk.Frame):
             self._mic_inputs_found = getattr(self, "_mic_inputs_found", []) + [payload]
         elif kind == "SIGNAL":
             self._mic_signals = getattr(self, "_mic_signals", []) + [payload]
+        elif kind == "MICLIST":
+            self._show_microphone_choices(*payload)
+        elif kind == "MICSET":
+            ok, label, message = payload
+            if ok:
+                self._enqueue("voice", "microphone set to %s - restart listening for "
+                                       "it to take effect" % label)
+            else:
+                self._enqueue("voice", "could not set the microphone: %s" % message)
+            self._refresh_microphones()
         elif kind == "KEYTEST":
             ok, where, error = payload
             self.keys_focus.config(
@@ -1175,6 +1249,23 @@ class App(ttk.Frame):
 
 
 def main():
+    # Two Managers each start their own voice bridges: both would transmit every ATC
+    # reply and both would reach for the microphone. Those symptoms look like faults in
+    # the module, so a second copy surfaces the first instead of starting.
+    lock = single_instance.Lock()
+    if not lock.acquire():
+        if not single_instance.show_existing_window():
+            # Could not find the window to raise, so say something rather than vanish.
+            try:
+                messagebox.showinfo(
+                    "ATCAI Manager",
+                    "ATCAI Manager is already running.\n\n"
+                    "Look for it in the taskbar. Running two copies would make ATC "
+                    "speak twice and both would fight for the microphone.")
+            except Exception:
+                pass
+        return 0
+
     root = tk.Tk()
     root.title("ATCAI Manager %s" % VERSION)
     root.geometry("900x700")
@@ -1187,6 +1278,7 @@ def main():
         app._remember()
         app.listener.stop()
         app.speaker.stop()
+        lock.release()
         root.destroy()
 
     root.protocol("WM_DELETE_WINDOW", on_close)

@@ -1,7 +1,7 @@
 # ATCAI — architecture and decisions
 
 How ATCAI is built and why it's built that way. Written after the fact: the bulk of it
-describes what exists and ships in v1.4.0. Two sections near the end look forward - what
+describes what exists and ships in v1.5.0. Two sections near the end look forward - what
 is worth building next, and what is possible but deliberately left alone.
 
 For the feature-by-feature state of the project see the status table in
@@ -278,15 +278,26 @@ machine (2026-09-21) showed two much cheaper routes, both verified:
    rebuilding the grammar in SAPI terms - and the wildcard grammar is the part that took
    the most tuning, so this is the fallback rather than the first choice.
 
-**The one open question** is whether `System.Speech` follows SAPI's category default or
-asks Windows independently. Comparing `AudioFormat` across pinned devices did not settle
-it - SAPI normalises every input to 16 kHz mono, so the format is identical either way.
-Settling it needs a different probe: check which endpoint holds an active capture session
-while the engine runs (`IAudioSessionManager2`, or an exclusive-mode `IAudioClient`
-open that fails when the device is in use).
+**Settled on 2026-10-25: route 1 holds, and this is now built.** The open question was
+whether `System.Speech` follows SAPI's category default or asks Windows independently.
+`AudioFormat` could not discriminate - SAPI normalises every input to 16 kHz mono - so
+the probe instead asked Core Audio which capture device held an **active audio session
+owned by our own process** while the engine was recognising
+(`IAudioSessionManager2` -> `IAudioSessionControl2::GetProcessId`). Pinning SAPI's
+default to each of three devices in turn, the engine opened exactly that device every
+time. Windows answered the question; nothing was inferred.
 
-If route 1 holds, this is small. If it doesn't, route 2 works but costs the grammar.
-Either way it no longer needs NAudio, a bundled DLL, or a blocking stream.
+So `recognize.ps1` is unchanged, there is no NAudio, no bundled DLL and no blocking
+stream. Selection is `voice-bridge/micselect.ps1` writing the token, driven by
+`atcai_micselect.py`, with a dropdown on the Test Microphone tab.
+
+Two things the script does deliberately: it **checks the device is in the live list
+before writing**, because SAPI silently substitutes a different device for an id it does
+not recognise - which would report success while selecting something else - and it
+**reads the value back** afterwards for the same reason.
+
+Route 2 (`SpInprocRecognizer.AudioInput`) remains the fallback if a future Windows
+stops honouring the token, and would cost rebuilding the grammar in SAPI terms.
 
 ## Possible, and deliberately not done
 

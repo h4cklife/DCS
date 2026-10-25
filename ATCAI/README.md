@@ -4,7 +4,7 @@
 [![Latest release](https://img.shields.io/github/v/release/h4cklife/DCS?filter=atcai-v*&label=release)](https://github.com/h4cklife/DCS/releases)
 [![Downloads](https://img.shields.io/github/downloads/h4cklife/DCS/total?label=downloads)](https://github.com/h4cklife/DCS/releases)
 [![Licence](https://img.shields.io/github/license/h4cklife/DCS)](../LICENSE)
-[![Tests](https://img.shields.io/badge/tests-454-brightgreen)](#tests)
+[![Tests](https://img.shields.io/badge/tests-498-brightgreen)](#tests)
 ![Platform](https://img.shields.io/badge/platform-Windows-0078d4?logo=windows)
 ![DCS World](https://img.shields.io/badge/DCS%20World-single--player-2ea44f)
 ![Python](https://img.shields.io/badge/python-3.12%2B-3776ab?logo=python&logoColor=white)
@@ -48,6 +48,7 @@ and roadmap.
 | 15 | Emergency and divert handling — mayday, vectors home, straight-in | **Done** — verified in-game |
 | 16 | Microphone diagnostics and a manager split into one-job tabs | **Done** — reviewed in the app |
 | 17 | Voice control of DCS's own comms menus — wingmen, AWACS | **Done** — verified in-game; off by default, see [docs/COMMS-KEYS-PLAN.md](docs/COMMS-KEYS-PLAN.md) |
+| 18 | Microphone selection, and one Manager at a time | **Done** — ATCAI picks its own microphone instead of following the Windows default |
 
 ATCAI loads into **every mission you fly** — stock missions, Instant Action, campaigns —
 with no mission editing at all. See Install.

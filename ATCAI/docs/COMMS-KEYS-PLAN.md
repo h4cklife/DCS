@@ -185,7 +185,7 @@ is explicitly a fly-test, not a substitute for the above.
 
 ## Phases, and where the branch can be abandoned
 
-**A — State and dry run. DONE, pending a flight.** `atc_state.lua`, state tailing, map
+**A — State and dry run. DONE, verified in flight 2026-10-24.** `atc_state.lua`, state tailing, map
 format, resolution, refusals, dry-run logging, tests. **No key is ever sent.** Zero risk
 to anything.
 
@@ -227,7 +227,7 @@ aircraft that no longer exists. `atc_state.lua` now publishes `slot2/slot3/slot4
 `Unit.getNumber()`, and the per-wingman commands require the specific slot. A module that
 won't report a number claims no slot, so the command refuses rather than guessing.
 
-**B — Prove keystrokes reach DCS. BUILT, pending a flight.** All eleven commands, not
+**B — Prove keystrokes reach DCS. DONE, verified in flight 2026-10-24.** All eleven commands, not
 just two: the resolution work was shared, so restricting it bought nothing.
 
 Built: `voice-bridge/atcai_sendkeys.py` - Set 1 scan codes via `SendInput` with
@@ -266,17 +266,31 @@ or comms-menu selections - searched, zero hits. So "the keystroke was accepted b
 Windows" is the most any log can confirm. That a wingman actually obeyed is only knowable
 by watching him, which is what makes Phase D more than a nicety.
 
-**C — Make it usable.** Manager tab, off-by-default wiring, maps for the modules you own,
+**C — Make it usable. DONE for the F-15C; other aircraft are the player's to verify.**
+Manager tab, off-by-default wiring, maps for the modules you own,
 documentation including a plain statement that it can affect mission outcomes.
 
-**D — Confirmation, and less optional than it looked.** After `flight_rejoin`, watch the
-wingman's heading and speed and report "acknowledged" if it changed. Read-only.
+**D — Confirmation. NOT BUILT, and on reflection probably not worth building.**
+The idea: after `flight_rejoin`, watch the wingman's heading and speed and report
+"acknowledged" if it changed. Read-only.
 
-Phase B's verification showed why this matters: DCS reports nothing about whether a
-command was obeyed, so `pressed:` in the log means only that Windows accepted the
-keystroke. Everything beyond that was confirmed by a human watching the formation. A
-heading check would be the only mechanism that could notice a sequence going stale after
-a DCS patch, rather than silently pressing the wrong thing.
+The motivation is real. DCS reports nothing about whether a command was obeyed, so
+`pressed:` means only that Windows accepted the keystroke, and a DCS patch that moved a
+menu entry would leave commands looking fine in the log while doing something else. A
+heading check is the only mechanism that could notice.
+
+But it cannot tell the two interesting cases apart. **A wingman already in formation does
+not change heading when told to rejoin** - so a correct, obeyed command would report "no
+acknowledgement". Same for "engage" with no bandits in range, or "return to base" from
+an aircraft already heading home. The check would produce false alarms in exactly the
+ordinary situations, and a warning that cries wolf is worse than no warning: it trains
+you to ignore it, including on the day it is right.
+
+Making it reliable would mean modelling what each command *should* change and under what
+conditions - which is a lot of machinery to detect a problem that has not happened yet,
+on a feature whose failure mode is "use the comms menu by hand". Left unbuilt
+deliberately. If DCS ever does move the menu entries, the cheap fix is to re-run the
+Phase A dry run against the live menu, which takes minutes.
 
 ## Experiments to run before writing much
 

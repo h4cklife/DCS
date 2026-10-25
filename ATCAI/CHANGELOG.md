@@ -1,5 +1,25 @@
 # Changelog
 
+## 1.5.0 - 2026-10-25
+
+### For players
+
+- **Pick your microphone.** The Test Microphone tab now has a dropdown listing every
+  microphone available, so ATCAI no longer has to use whichever one Windows happens to
+  have as default. Choose *Windows default* to behave as before — it shows you which
+  device that currently means.
+
+  This sets the microphone for **speech programs only**. Windows' own default recording
+  device is left alone, so Discord, SRS and everything else are unaffected. Restart
+  listening after changing it.
+
+### Fixed
+
+- **Only one Manager can run at a time.** Starting a second copy now brings the first to
+  the front instead of opening another window. Two copies each started their own voice
+  bridges, so ATC replies were spoken twice and both fought over the microphone —
+  symptoms that looked like faults in the module rather than like two copies running.
+
 ## 1.4.0 - 2026-10-24
 
 ### For players

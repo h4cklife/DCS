@@ -334,6 +334,51 @@ class TestMicrophoneTest:
         for name in ("mic_button", "mic_device", "mic_level", "mic_results"):
             assert hasattr(gui, name)
 
+    def test_the_chooser_exists(self, gui):
+        assert hasattr(gui, "mic_choice")
+
+    def test_it_offers_windows_default_first_then_the_devices(self, gui):
+        gui._show_microphone_choices(
+            "windows-default", "Microphone (PS VR2 Audio)",
+            [("tok-a", "Scarlett 2i2"), ("tok-b", "Razer")], None)
+        values = list(gui.mic_choice.cget("values"))
+        assert values[0].startswith("Windows default")
+        assert "PS VR2 Audio" in values[0], "say what following Windows means today"
+        assert values[1:] == ["Scarlett 2i2", "Razer"]
+        assert gui.mic_choice.get() == values[0]
+
+    def test_an_explicit_choice_is_shown_as_itself(self, gui):
+        gui._show_microphone_choices(
+            "tok-b", "Microphone (PS VR2 Audio)",
+            [("tok-a", "Scarlett 2i2"), ("tok-b", "Razer")], None)
+        assert gui.mic_choice.get() == "Razer"
+
+    def test_a_device_that_has_gone_falls_back_to_windows_default(self, gui):
+        """A selected headset that is now switched off must not leave the chooser
+        showing something that isn't there."""
+        gui._show_microphone_choices(
+            "tok-gone", "Microphone (PS VR2 Audio)",
+            [("tok-a", "Scarlett 2i2")], None)
+        assert gui.mic_choice.get().startswith("Windows default")
+
+    def test_a_listing_failure_is_logged_not_crashed(self, gui):
+        gui._show_microphone_choices(None, None, [], "COM blew up")
+        gui._drain()
+        assert "could not list microphones" in gui.log_view.get("1.0", "end")
+
+    def test_setting_a_device_says_to_restart_listening(self, gui):
+        """The engine binds its input when it starts, so a change mid-session does
+        nothing until it is restarted."""
+        gui._on_mic_event("MICSET", (True, "Scarlett 2i2", "ok"))
+        gui._drain()
+        logged = gui.log_view.get("1.0", "end")
+        assert "Scarlett 2i2" in logged and "restart listening" in logged
+
+    def test_a_failed_set_is_reported(self, gui):
+        gui._on_mic_event("MICSET", (False, "Scarlett 2i2", "not available"))
+        gui._drain()
+        assert "could not set the microphone" in gui.log_view.get("1.0", "end")
+
     def test_names_the_device_windows_chose(self, gui):
         """Which microphone is in use is the thing ATCAI can't choose and won't say."""
         gui._on_mic_event("DEVICE", "Razer BlackShark V2")
