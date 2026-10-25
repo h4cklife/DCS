@@ -4,7 +4,7 @@
 [![Latest release](https://img.shields.io/github/v/release/h4cklife/DCS?filter=atcai-v*&label=release)](https://github.com/h4cklife/DCS/releases)
 [![Downloads](https://img.shields.io/github/downloads/h4cklife/DCS/total?label=downloads)](https://github.com/h4cklife/DCS/releases)
 [![Licence](https://img.shields.io/github/license/h4cklife/DCS)](../LICENSE)
-[![Tests](https://img.shields.io/badge/tests-585-brightgreen)](#tests)
+[![Tests](https://img.shields.io/badge/tests-586-brightgreen)](#tests)
 ![Platform](https://img.shields.io/badge/platform-Windows-0078d4?logo=windows)
 ![DCS World](https://img.shields.io/badge/DCS%20World-single--player-2ea44f)
 ![Python](https://img.shields.io/badge/python-3.12%2B-3776ab?logo=python&logoColor=white)
@@ -504,6 +504,44 @@ the voice bridge does from outside the sim.
 
 This is the one part of ATCAI that writes to the game rather than only reading it. It is
 off by default behind two switches on the manager's **Comms Keys** tab.
+
+### What ships inside the exe, and where it lands
+
+`ATCAI-Manager.exe` is one file with everything inside it. PyInstaller finds imported
+Python by itself; **everything else is listed by hand in `build_exe.py`'s `BUNDLED`**,
+and a file left off that list is missing only in the built exe — which is why
+`tests/test_wiring.py` asserts every non-Python file under `voice-bridge/` appears there.
+
+| Bundled | What it is | Where it lands at runtime |
+|---|---|---|
+| `lua/` | the mission scripts and the Hook | `<Saved Games>\DCS\Scripts\ATCAI\` and `Scripts\Hooks\`, written by **Install** |
+| `voice-bridge/recognize.ps1` | the speech recogniser | stays inside the exe |
+| `voice-bridge/mictest.ps1` | microphone diagnostic | stays inside the exe |
+| `voice-bridge/micselect.ps1` | microphone chooser | stays inside the exe |
+| `voice-bridge/readbindings.lua` | reads DCS's key bindings | stays inside the exe |
+| `voice-bridge/keymaps/*.json` | comms-menu commands per aircraft | copied to `%LOCALAPPDATA%\ATCAI\keymaps\` |
+| `voice-bridge/cockpit/controls.json` | cockpit commands | copied to `%LOCALAPPDATA%\ATCAI\cockpit\` |
+
+**Only the two JSON groups are copied out**, because they are the only ones a player is
+meant to edit. The scripts run from inside the exe, where nothing can accidentally
+diverge from the build.
+
+### The three places ATCAI writes
+
+| Path | Holds | Removed by |
+|---|---|---|
+| `%LOCALAPPDATA%\ATCAI\manager.json` | the Manager's own settings | nothing — kept deliberately |
+| `%LOCALAPPDATA%\ATCAI\keymaps\`, `...\cockpit\` | your editable command lists | nothing — your edits are yours |
+| `<Saved Games>\DCS\Scripts\ATCAI\` | the installed mission scripts | **Remove** in the Manager |
+
+Copying out happens **the first time the relevant tab is opened**, and only ever *adds*:
+a file you have edited is never overwritten, so an update that ships a new aircraft map
+cannot discard your phrasings for the old ones. **Use shipped maps** / **Use shipped
+controls** overwrite deliberately, and say so before they do.
+
+If that folder does not exist yet — a fresh download, before any tab has been opened —
+the app reads the bundled copies instead. That fallback is what makes a single-file
+download work immediately.
 
 ### Which file am I editing? (read this first)
 

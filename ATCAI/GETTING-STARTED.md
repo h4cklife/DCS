@@ -332,6 +332,46 @@ so you can see what you're changing from. **Back to defaults** puts them all bac
 
 Changes apply next time you start a mission.
 
+## Where your files are
+
+You downloaded one file, `ATCAI-Manager.exe`, with everything inside it. Two of those
+things get copied out so you can edit them:
+
+```
+%LOCALAPPDATA%\ATCAI\
+├── manager.json          the manager's own settings — no need to touch this
+├── keymaps\
+│   ├── F-15C.json        wingman and AWACS commands, per aircraft
+│   ├── A-10A.json
+│   ├── Su-25T.json
+│   └── TF-51D.json
+└── cockpit\
+    └── controls.json     gear, flaps, airbrake, canopy, lights
+```
+
+**Paste `%LOCALAPPDATA%\ATCAI` into Explorer's address bar** to get there — Windows
+expands it for you.
+
+They appear the first time you open the tab that uses them: the **keymaps** when you open
+Comms Keys, the **cockpit** file when you open AI Cockpit. So if a folder is missing,
+open that tab once.
+
+**Your edits are safe across updates.** A new version only ever adds files it has that
+you don't — it never overwrites one you've changed. If you ever want the originals back,
+**Use shipped maps** and **Use shipped controls** on those tabs will do it, and they ask
+first.
+
+**After editing any of them, stop and start listening** on the Talking to ATC tab. The
+voice recogniser reads these files once, when it starts.
+
+Everything else — the speech recogniser, the microphone tools, the part that reads your
+DCS key bindings — stays inside the exe. There's nothing else to install and nothing else
+to find.
+
+ATCAI also writes the mission scripts into DCS itself, at
+`<Saved Games>\DCS\Scripts\ATCAI\`. **Remove** in the manager deletes those. It
+leaves the folder above alone, so your settings and edits survive uninstalling.
+
 ## Turning it off
 
 - **Turn off** in the manager stops ATCAI without removing anything. Restart DCS.

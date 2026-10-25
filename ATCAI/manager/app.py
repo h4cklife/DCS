@@ -36,7 +36,7 @@ import atcai_cockpit  # noqa: E402
 import atcai_keys  # noqa: E402
 import atcai_sendkeys  # noqa: E402
 
-VERSION = "1.6.0"
+VERSION = "1.6.1"
 PAD = 8
 
 

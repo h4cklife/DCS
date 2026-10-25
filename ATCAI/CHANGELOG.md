@@ -1,5 +1,27 @@
 # Changelog
 
+## 1.6.1 - 2026-10-26
+
+### For players
+
+- **Documented where your files are.** One place in the guide listing everything the exe
+  copies out and where it puts it, so the editable command lists are findable without
+  hunting: `%LOCALAPPDATA%\ATCAI\keymaps\` and `...\cockpit\`. Also says which tab
+  creates them, that your edits survive updates, and that uninstalling leaves them alone.
+
+### Fixed
+
+- **A packaging test that only covered half the files it claimed to.** It checked that
+  every `.ps1` helper was bundled into the exe, but nothing covered `readbindings.lua`
+  or the JSON command lists — so either could have been dropped from the build with no
+  test failing, and the only symptom would have been every cockpit control reading as
+  unknown in the released exe. It now asserts every non-Python runtime file is bundled,
+  as a directory scan rather than a list, so files added later are covered without
+  anyone remembering to extend it.
+
+  Nothing was actually missing from 1.6.0 — this closes the gap that would have let it
+  happen unnoticed.
+
 ## 1.6.0 - 2026-10-25
 
 ### For players

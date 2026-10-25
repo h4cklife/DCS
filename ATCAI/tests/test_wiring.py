@@ -97,17 +97,37 @@ class TestPackaging:
     """A helper script that isn't bundled is missing only in the built exe - the one
     place it can't be checked by running from source."""
 
-    def test_every_powershell_helper_is_bundled(self):
+    @staticmethod
+    def _bundled_names():
         import importlib.util
         spec = importlib.util.spec_from_file_location(
             "build_exe", ROOT / "manager" / "build_exe.py")
         build_exe = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(build_exe)
+        return {src.name for src, _ in build_exe.BUNDLED}
 
-        bundled = {src.name for src, _ in build_exe.BUNDLED}
-        for script in (ROOT / "voice-bridge").glob("*.ps1"):
-            assert script.name in bundled, (
-                "%s is used at runtime but would be missing from the exe" % script.name)
+    def test_every_non_python_runtime_file_is_bundled(self):
+        """Not just the .ps1 files. PyInstaller picks up imported Python by itself;
+        everything else - scripts, Lua, the JSON maps - has to be listed by hand, and
+        forgetting one fails only in the built exe.
+
+        Deliberately broad rather than a list of known files, so a new runtime file
+        added later is covered without anyone remembering to extend this.
+        """
+        bundled = self._bundled_names()
+        missing = []
+        for entry in sorted((ROOT / "voice-bridge").iterdir()):
+            if entry.name in ("__pycache__",) or entry.suffix == ".py":
+                continue
+            if entry.name not in bundled:
+                missing.append(entry.name)
+        assert not missing, (
+            "used at runtime but would be missing from the exe: %s" % missing)
+
+    def test_the_lua_the_bindings_reader_needs_is_bundled(self):
+        """Named explicitly as well: without it, cockpit commands cannot find a single
+        key combination, and the only symptom is every control reading as unknown."""
+        assert "readbindings.lua" in self._bundled_names()
 
 
 class TestConfigDefaults:
