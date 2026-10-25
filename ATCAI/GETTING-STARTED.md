@@ -1,4 +1,4 @@
-# ATCAI — talk to air traffic control in DCS
+# ATCAI — talk to DCS, and have it talk back
 
 [![Download](https://img.shields.io/github/v/release/h4cklife/DCS?filter=atcai-v*&label=download&color=2ea44f)](https://github.com/h4cklife/DCS/releases)
 [![Licence](https://img.shields.io/github/license/h4cklife/DCS)](../LICENSE)
@@ -6,9 +6,21 @@
 [![Bitcoin](https://img.shields.io/badge/Bitcoin-donate-f7931a?logo=bitcoin&logoColor=white)](#support-the-project)
 [![Ethereum](https://img.shields.io/badge/Ethereum-donate-3c3c3d?logo=ethereum&logoColor=white)](#support-the-project)
 
-ATCAI gives DCS an air traffic controller you can actually talk to. Ask for startup,
-taxi, takeoff, a circuit join or landing clearance, and it answers out loud — with the
-real wind, the real altimeter setting, and the runway that actually suits the weather.
+ATCAI lets you fly DCS by talking to it.
+
+**Air traffic control that answers out loud.** Ask for startup, taxi, takeoff, a circuit
+join or landing clearance, and it replies — with the real wind, the real altimeter
+setting, and the runway that actually suits the weather. There's an ATIS, it holds and
+sequences you behind other traffic, and if you declare an emergency you get priority.
+
+**Your wingmen and AWACS**, without diving through the comms menu. *"Two, rejoin."*
+*"Flight, engage bandits."* *"AWACS, picture."*
+
+**Your own cockpit.** *"Gear up."* *"Flaps."* *"Airbrake out."*
+
+Everything also works from the comms menu, so voice is a convenience rather than
+something you have to rely on. The wingman and cockpit commands are **off until you turn
+them on** — they work by pressing keys, so they get their own switches.
 
 Works in **every mission you fly**: Instant Action, your own missions, campaigns. There
 is nothing to set up per mission.
@@ -231,6 +243,84 @@ keystrokes on your machine and no key map will help.
 **One honest warning:** nothing confirms a command was carried out. DCS tells us only
 that the keystroke was accepted, so if a game update moves a menu entry, a command will
 appear to work in the log while doing something else. Spot-check after DCS patches.
+
+## Working the cockpit by voice
+
+Say **"gear up"** and the gear comes up. ATCAI presses the key for you.
+
+Like the wingman commands, this is **off by default**, on its own **AI Cockpit** tab,
+behind two switches:
+
+1. **Listen for cockpit commands** — recognises them and logs what it *would* press.
+2. **Actually press the keys** — does it.
+
+Start with the first, check the Log tab shows the right key for each command, then turn
+on the second. **Both only take effect when you stop and start listening** — the tab
+tells you so when you tick them.
+
+| Say | What happens |
+|---|---|
+| "gear up" / "gear down" | Landing gear |
+| "flaps" | Flaps up or down, whichever is next |
+| "airbrake out" / "airbrake in" | Airbrake |
+| "canopy" | Opens or closes it — on the ground only |
+| "nav lights" | Navigation lights |
+
+### ATCAI does not decide the keys — DCS does
+
+This is the important bit. ATCAI reads the key combinations **out of your own DCS binding
+files**, including anything you have rebound. If your gear is on a different key than
+standard, it already works.
+
+The AI Cockpit tab lists each control with the key it found and the phrases that trigger
+it:
+
+```
+Landing Gear Up      LCtrl+G    "gear up", "gear coming up", "raise the gear"
+Landing Gear Down    LShift+G   "gear down", "gear coming down", "lower the gear"
+Flaps Up/Down        F          "flaps", "toggle flaps", "flaps now"
+```
+
+**If you rebind a control in DCS's options, press "Re-read bindings".** ATCAI reads the
+files when it starts, not continuously.
+
+If a key column shows `?`, ATCAI could not find that control for your aircraft — usually
+because the aircraft does not have it. The command will refuse itself and say so.
+
+### It knows when not to
+
+- **"Gear up" is refused on the ground.** "Gear down" is allowed, because lowering gear
+  you already have down is harmless.
+- **"Canopy" is refused in flight**, for the opposite reason.
+- **Nothing is sent unless DCS is the active window.** Alt-tab away mid-command and the
+  rest is dropped rather than typed into whatever you switched to.
+
+### What it will never do
+
+**Eject, jettison, engine shutdown, weapons release, master arm and countermeasures are
+refused in code.** Not merely left off the list — they cannot be enabled by editing it.
+A voice command that can eject you is a bad trade for convenience.
+
+### Changing what you say
+
+```
+%LOCALAPPDATA%\ATCAI\cockpit\controls.json
+```
+
+Paste that into Explorer's address bar. Edit the `phrases` list for any command, save,
+then stop and start listening. **Use shipped controls** on the tab puts the original back.
+
+### How sure it must be
+
+The AI Cockpit tab has its own confidence slider, separate from ATC's. That is
+deliberate: "gear up" and "gear down" differ by one word and do opposite things, so the
+bar for acting on them is set apart from the bar for answering a radio call. Measured
+across twenty utterances the recogniser told them apart every time, with the lowest
+reading 0.73 — the default sits just below that.
+
+**One honest limit:** nothing confirms a control actually moved. DCS reports neither the
+keystroke nor the result, so the log can only say the key was accepted. If a DCS update
+moves a binding, press **Re-read bindings**.
 
 ## Settings
 

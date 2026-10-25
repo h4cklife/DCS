@@ -34,9 +34,11 @@ class TestPhraseCoverage:
     def test_every_intent_is_reachable(self, lookup):
         """Both halves: ATC requests from the source, comms commands from the key maps.
         An intent in neither would be defined and unsayable."""
+        import atcai_cockpit
         import atcai_keys
-        expected = set(listen.INTENT_PHRASES) | atcai_keys.comms_intents()
-        assert expected, "nothing to check - the sets were both empty"
+        expected = (set(listen.INTENT_PHRASES) | atcai_keys.comms_intents()
+                    | atcai_cockpit.cockpit_intents())
+        assert expected, "nothing to check - the sets were all empty"
         assert sorted(set(lookup.values())) == sorted(expected)
 
     def test_intents_match_what_the_mission_understands(self, repo_root):

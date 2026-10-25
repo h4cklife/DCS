@@ -4,17 +4,110 @@
 [![Latest release](https://img.shields.io/github/v/release/h4cklife/DCS?filter=atcai-v*&label=release)](https://github.com/h4cklife/DCS/releases)
 [![Downloads](https://img.shields.io/github/downloads/h4cklife/DCS/total?label=downloads)](https://github.com/h4cklife/DCS/releases)
 [![Licence](https://img.shields.io/github/license/h4cklife/DCS)](../LICENSE)
-[![Tests](https://img.shields.io/badge/tests-498-brightgreen)](#tests)
+[![Tests](https://img.shields.io/badge/tests-585-brightgreen)](#tests)
 ![Platform](https://img.shields.io/badge/platform-Windows-0078d4?logo=windows)
 ![DCS World](https://img.shields.io/badge/DCS%20World-single--player-2ea44f)
 ![Python](https://img.shields.io/badge/python-3.12%2B-3776ab?logo=python&logoColor=white)
 [![Bitcoin](https://img.shields.io/badge/Bitcoin-donate-f7931a?logo=bitcoin&logoColor=white)](#support-the-project)
 [![Ethereum](https://img.shields.io/badge/Ethereum-donate-3c3c3d?logo=ethereum&logoColor=white)](#support-the-project)
 
-An AI air traffic controller for DCS World single-player: startup, taxi, takeoff,
-circuit joins, landing and loadout callouts. You can talk to it and it talks back —
-speech recognition for your requests, text-to-speech for ATC's replies — or drive the
-whole thing from the in-game comms menu instead.
+Talk to DCS World in single-player, and have it talk back. ATCAI is an AI air traffic
+controller you work by voice — and, since it learned to press keys, it also commands your
+wingmen, queries AWACS, and works your own cockpit switches.
+
+Speech recognition runs offline on Windows' own recogniser; replies come back as
+text-to-speech over SimpleRadio or your speakers. Everything also works from the in-game
+comms menu, so voice is a convenience rather than a dependency.
+
+## What it does
+
+**Air traffic control that ATCAI provides itself**
+
+- Startup, taxi, takeoff, circuit joins, landing and taxi-to-parking, with phase
+  enforcement — no takeoff clearance from a parking spot
+- Real weather: the active runway follows the wind, clearances carry wind and altimeter
+- **Each airfield's real frequencies**, read from DCS's own terrain files
+- A spoken **ATIS** on request, plus a looping broadcast on its own channel
+- **Traffic awareness** — holds, sequencing behind arrivals, go-arounds
+- **Emergencies**: declare one and you get priority, an immediate clearance, and an
+  answer from any distance; plus vectors to the nearest field your side can use
+- Loadout callouts
+
+**Things DCS owns, that ATCAI drives for you**
+
+- **Your flight** — rejoin, engage, return to base, individually or as a flight
+- **AWACS** — picture and bogey dope
+- **Your cockpit** — gear, flaps, airbrake, canopy, navigation lights
+
+The last two work by pressing keys, because mission scripting cannot reach those menus.
+Both are **off by default**, and the cockpit key combinations are read from your own DCS
+bindings rather than assumed.
+
+**Around the edges**
+
+- One program installs, enables and configures everything; no command line
+- A **microphone test** that tells you which device is in use, whether sound is arriving,
+  and what it heard — including speech it heard but could not match
+- **Microphone selection**, so ATCAI need not follow whatever Windows picks
+- Push-to-talk, optional and off by default
+- Loads into **every mission** — stock, custom or campaign — with no mission editing
+
+## Voice commands
+
+Everything below also appears in the comms menu under **Other → ATCAI**, except the
+cockpit and flight commands, which have no menu of their own.
+
+### Talking to ATC
+
+| Say | What you get |
+|---|---|
+| "radio check" | Confirmation it hears you |
+| "request airfield information" | ATIS: letter, time, runway, wind, temperature, altimeter |
+| "request startup" | Approval, runway in use, wind, altimeter |
+| "request taxi" | Taxi to the holding point |
+| "request takeoff" | Clearance, or a hold if the runway is busy |
+| "report inbound" | A circuit join, your distance, wind and altimeter |
+| "request straight in" | Permission to skip the circuit |
+| "request landing" | Clearance, sequencing, or a go-around |
+| "request parking" | Vacate and taxi in |
+| "request loadout" | Your remaining stores, from any distance |
+| "request vectors" | Heading and distance to the nearest friendly field |
+| **"mayday"** / "pan pan" | Priority, immediate clearance, answered at any range |
+
+### Your flight and AWACS
+
+| Say | What happens |
+|---|---|
+| "two rejoin" / "three rejoin" / "four rejoin" | That wingman rejoins |
+| "two engage bandits" / "three engage bandits" / "four engage bandits" | That wingman engages |
+| "flight rejoin" | The whole flight rejoins |
+| "flight engage bandits" | The whole flight engages |
+| "flight return to base" | The flight goes home |
+| "awacs picture" | AWACS gives the picture |
+| "bogey dope" | AWACS gives a bogey dope |
+
+A wingman who is gone is refused by name — *"two is not with you"* — and because DCS
+renumbers its menu as aircraft are lost, the right key is worked out from who is still
+flying.
+
+### Your cockpit
+
+| Say | What happens | Note |
+|---|---|---|
+| "gear up" | Landing gear up | refused on the ground |
+| "gear down" | Landing gear down | |
+| "flaps" | Flaps up or down, whichever is next | toggle |
+| "airbrake out" / "airbrake in" | Airbrake extends / retracts | |
+| "canopy" | Opens or closes | on the ground only |
+| "nav lights" | Navigation lights | toggle |
+
+**Never by voice:** eject, jettison, engine shutdown, weapons release, master arm and
+countermeasures are refused in code and cannot be enabled by editing a file.
+
+Most commands accept several phrasings — "request" and "requesting" are interchangeable
+everywhere, as are "report" and "reporting", and "declare" and "declaring". The full
+lists live in `voice-bridge/keymaps/` and `voice-bridge/cockpit/controls.json`, and are
+yours to edit.
 
 **Just want to use it?** Read [GETTING-STARTED.md](GETTING-STARTED.md) instead — this
 file is about how it works and how to develop it.
@@ -49,39 +142,16 @@ and roadmap.
 | 16 | Microphone diagnostics and a manager split into one-job tabs | **Done** — reviewed in the app |
 | 17 | Voice control of DCS's own comms menus — wingmen, AWACS | **Done** — verified in-game; off by default, see [docs/COMMS-KEYS-PLAN.md](docs/COMMS-KEYS-PLAN.md) |
 | 18 | Microphone selection, and one Manager at a time | **Done** — ATCAI picks its own microphone instead of following the Windows default |
+| 19 | Cockpit controls by voice — gear, flaps, airbrake, canopy, lights | **Done** — verified in-game; off by default, keys read from DCS's own bindings, see [docs/COCKPIT-PLAN.md](docs/COCKPIT-PLAN.md) |
 
 ATCAI loads into **every mission you fly** — stock missions, Instant Action, campaigns —
 with no mission editing at all. See Install.
 
-## What works right now
+## How ATC behaves
 
-Once loaded into a mission (see Install), spawn into a player-controlled aircraft parked
-at an airbase. Open the comms menu (`\` by default) and find **Other... → ATCAI** for:
-
-- **Request radio check** — ATC confirms it hears you.
-- **Request airfield information** — a spoken ATIS: information letter, time, runway in
-  use, wind, temperature and altimeter.
-
-There's also a **repeating ATIS broadcast** on its own frequency (380.000 AM by default,
-every 60s), carrying the information for whichever field you're nearest. Tune in and
-listen rather than asking. Configurable in the manager's Settings tab, including letting
-it pick an unused frequency for you.
-- **Request startup** — approves startup, names the runway in use, gives wind and QNH.
-- **Request taxi** — taxi to the holding point for the active runway, with QNH.
-- **Request takeoff** — takeoff clearance with current wind, or a hold if the runway is
-  occupied or someone's on final.
-- **Report inbound** — circuit join for the active runway, with your range from the
-  field, wind and QNH.
-- **Request landing** — landing clearance with wind, a go-around if the runway is
-  occupied, or sequencing behind traffic ahead of you.
-- **Request taxi to parking** — after landing, vacate and taxi in.
-- **Request loadout status** — reads back your current weapon/store loadout.
-- **Request straight-in approach** — skip the circuit when flying a full pattern isn't
-  realistic. Traffic ahead delays you rather than refusing the approach.
-- **Request vectors to nearest field** — the nearest field *your coalition can use*, with
-  a heading and distance to it. Answered at any range, because being out of ATC range is
-  the situation the call exists for.
-- **Declare emergency** — or just say "mayday". See below.
+The commands themselves are listed under [Voice commands](#voice-commands) above. This
+section is the behaviour behind them — the parts that are not obvious from a command
+name.
 
 **Declaring an emergency changes how ATC treats you.** Once declared, and until you're
 parked:
@@ -743,7 +813,8 @@ ATCAI/
 ├── docs/
 │   ├── PLAN.md             architecture, and why it's built this way
 │   ├── INSTALLER-PLAN.md   how the manager app came about
-│   └── COMMS-KEYS-PLAN.md  wingman/AWACS commands: how and why
+│   ├── COMMS-KEYS-PLAN.md  wingman/AWACS commands: how and why
+│   └── COCKPIT-PLAN.md     voice control of cockpit controls (proposed)
 ├── lua/atc/                the ATC itself, loaded into every mission
 │   ├── atc_config.lua      applies user settings over script defaults
 │   ├── atc_core.lua        phases, phraseology, wind/runway/weather logic

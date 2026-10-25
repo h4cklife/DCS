@@ -31,10 +31,12 @@ import atcai_listen  # noqa: E402
 import atcai_tts  # noqa: E402
 import atcai_mictest  # noqa: E402
 import atcai_micselect  # noqa: E402
+import atcai_bindings  # noqa: E402
+import atcai_cockpit  # noqa: E402
 import atcai_keys  # noqa: E402
 import atcai_sendkeys  # noqa: E402
 
-VERSION = "1.5.0"
+VERSION = "1.6.0"
 PAD = 8
 
 
@@ -122,6 +124,7 @@ class App(ttk.Frame):
         self._build_mic(tabs)
         self._build_hearing(tabs)
         self._build_comms(tabs)
+        self._build_cockpit(tabs)
         self._build_settings(tabs)
         self._build_log(tabs)
 
@@ -308,8 +311,10 @@ class App(ttk.Frame):
         box.columnconfigure(1, weight=1)
 
         self.comms_keys_enabled = tk.BooleanVar(value=False)
-        ttk.Checkbutton(box, variable=self.comms_keys_enabled, command=self._remember,
-                        text="Listen for comms menu commands (dry run - presses nothing)"
+        ttk.Checkbutton(box, variable=self.comms_keys_enabled,
+                        command=lambda: self._on_voice_switch_toggled(
+                            "comms menu commands", self.comms_keys_enabled.get()),
+                        text="Listen for comms menu commands"
                         ).grid(row=0, column=0, columnspan=2, sticky="w")
 
         ttk.Label(box, text="Aircraft:").grid(row=1, column=0, sticky="w",
@@ -367,15 +372,30 @@ class App(ttk.Frame):
             "turns out."
         )).grid(row=8, column=0, columnspan=2, sticky="w", pady=(PAD, 0))
 
+    def _on_voice_switch_toggled(self, what, now_on):
+        """Every voice switch only takes effect when listening restarts.
+
+        The recogniser builds its grammar and reads its settings once, at start. A
+        switch that silently does nothing until then is indistinguishable from a broken
+        feature - which is how the cockpit switch cost a test flight.
+        """
+        self._remember()
+        state = "on" if now_on else "off"
+        if self.listener.running:
+            self._enqueue("voice", "%s %s - restart listening (Stop then Start on "
+                                   "Talking to ATC) for this to take effect"
+                                   % (what, state))
+        else:
+            self._enqueue("voice", "%s %s - takes effect when you start listening"
+                                   % (what, state))
+
     def _on_send_keys_toggled(self):
         """Pressing keys for real is a different proposition from logging them, so it
         says so plainly rather than flipping silently."""
-        self._remember()
         if self.send_keys_enabled.get():
-            self._enqueue("voice", "comms keys will now be PRESSED in DCS - restart "
-                                   "listening for this to take effect")
+            self._on_voice_switch_toggled("comms keys: PRESSING FOR REAL", True)
         else:
-            self._enqueue("voice", "comms keys back to dry run - restart listening")
+            self._on_voice_switch_toggled("comms keys: back to dry run", False)
 
     def _test_keys_in_notepad(self):
         """Prove synthetic keystrokes reach a window at all, without involving DCS.
@@ -469,6 +489,167 @@ class App(ttk.Frame):
         self.log_view = tk.Text(tab, height=10, wrap="word", state="disabled")
         self.log_view.grid(row=1, column=0, sticky="nsew", pady=(PAD, 0))
 
+    def _build_cockpit(self, tabs):
+        """Cockpit controls by voice. The keys come from DCS, not from here."""
+        tab = ttk.Frame(tabs, padding=PAD)
+        tabs.add(tab, text="AI Cockpit")
+        tab.columnconfigure(0, weight=1)
+        tab.rowconfigure(3, weight=1)
+
+        box = ttk.LabelFrame(tab, text="Cockpit controls by voice (experimental)",
+                             padding=PAD)
+        box.grid(row=0, column=0, sticky="ew")
+        box.columnconfigure(1, weight=1)
+
+        self.cockpit_enabled = tk.BooleanVar(value=False)
+        ttk.Checkbutton(box, variable=self.cockpit_enabled,
+                        command=lambda: self._on_voice_switch_toggled(
+                            "cockpit commands", self.cockpit_enabled.get()),
+                        text="Listen for cockpit commands"
+                        ).grid(row=0, column=0, columnspan=3, sticky="w")
+        self.cockpit_send = tk.BooleanVar(value=False)
+        ttk.Checkbutton(box, variable=self.cockpit_send,
+                        command=self._on_cockpit_send_toggled,
+                        text="Actually press the keys (otherwise dry run)"
+                        ).grid(row=1, column=0, columnspan=3, sticky="w")
+
+        ttk.Label(box, text="How sure it must be:").grid(row=2, column=0, sticky="w",
+                                                         pady=(PAD, 0))
+        self.cockpit_confidence = tk.DoubleVar(value=0.70)
+        ttk.Scale(box, from_=0.5, to=0.95, variable=self.cockpit_confidence,
+                  orient="horizontal", length=220, command=lambda _: self._remember()
+                  ).grid(row=2, column=1, sticky="w", padx=(PAD, 0), pady=(PAD, 0))
+        ttk.Label(box, foreground="#555", text="separate from ATC's - a wrong cockpit "
+                  "command costs more than a wrong request"
+                  ).grid(row=3, column=0, columnspan=3, sticky="w")
+
+        ttk.Label(box, text="Aircraft:").grid(row=4, column=0, sticky="w",
+                                              pady=(PAD, 0))
+        self.cockpit_aircraft = ttk.Label(box, text="not in a mission yet",
+                                          foreground="#555")
+        self.cockpit_aircraft.grid(row=4, column=1, sticky="w", padx=(PAD, 0),
+                                   pady=(PAD, 0))
+        ttk.Button(box, text="Re-read bindings", command=self._reread_bindings
+                   ).grid(row=4, column=2, sticky="w", padx=(PAD, 0), pady=(PAD, 0))
+
+        ttk.Label(tab, wraplength=740, justify="left", text=(
+            "ATCAI does not decide the key combinations - DCS does, and this reads them "
+            "from your own binding files, including anything you have rebound. If you "
+            "change a control in DCS's options, press Re-read bindings."
+        )).grid(row=1, column=0, sticky="w", pady=(PAD, 0))
+
+        self.cockpit_controls = tk.Text(tab, height=10, wrap="none", state="disabled")
+        self.cockpit_controls.grid(row=3, column=0, sticky="nsew", pady=(PAD, 0))
+
+        self.cockpit_path = ttk.Label(tab, text="", foreground="#555", wraplength=740,
+                                      justify="left")
+        self.cockpit_path.grid(row=4, column=0, sticky="w")
+        ttk.Button(tab, text="Use shipped controls", command=self._reset_cockpit_controls
+                   ).grid(row=5, column=0, sticky="w", pady=(4, 0))
+
+        ttk.Label(tab, wraplength=740, justify="left", foreground="#b45309", text=(
+            "Keys are only sent while DCS is the active window. Destructive controls - "
+            "eject, jettison, engine shutdown, weapons, countermeasures - are refused "
+            "in code and cannot be enabled by editing the file."
+        )).grid(row=6, column=0, sticky="w", pady=(PAD, 0))
+
+        self._refresh_cockpit_controls()
+
+    def _bindings(self):
+        """The binding cache, built once the DCS folders are known.
+
+        The game folder holds the profiles and luae.exe; the writedir holds the
+        player's remappings. Both are needed, and neither is known until a DCS folder
+        has been chosen.
+        """
+        if getattr(self, "_bindings_cache", None):
+            return self._bindings_cache
+
+        game = None
+        try:
+            installs = installer.find_dcs_installs()
+            game = installs[0] if installs else None
+        except Exception:
+            game = None
+        if not game:
+            return None
+
+        self._bindings_cache = atcai_bindings.Cache(
+            dcs_install=game,
+            dcs_writedir=self.installation.path if self.installation else None,
+            on_log=lambda message: self._enqueue("voice", message))
+        return self._bindings_cache
+
+    def _on_cockpit_send_toggled(self):
+        if self.cockpit_send.get():
+            self._on_voice_switch_toggled("cockpit keys: PRESSING FOR REAL", True)
+        else:
+            self._on_voice_switch_toggled("cockpit keys: back to dry run", False)
+
+    def _cockpit_write(self, text):
+        self.cockpit_controls.config(state="normal")
+        self.cockpit_controls.delete("1.0", "end")
+        self.cockpit_controls.insert("end", text)
+        self.cockpit_controls.config(state="disabled")
+
+    def _refresh_cockpit_controls(self):
+        """Show each command: the control, the chord DCS gave it, and the phrases.
+
+        One screen answering both "what do I say" and "what will it press", which are
+        the two questions anyone actually has.
+        """
+        try:
+            copied = atcai_cockpit.seed_user_controls()
+            if copied:
+                self._enqueue("app", "control list copied to %s - edit it there"
+                              % atcai_cockpit.user_dir())
+            controls = atcai_cockpit.load_controls()
+            folder = atcai_cockpit.controls_dir()
+        except Exception as exc:                          # never take the GUI down
+            self._cockpit_write("could not read the control list: %r" % exc)
+            return
+
+        bindings = {}
+        aircraft = getattr(self, "_cockpit_last_aircraft", None)
+        if aircraft and getattr(self, "_bindings_cache", None):
+            try:
+                bindings = self._bindings_cache.get(aircraft)
+            except Exception:
+                bindings = {}
+
+        lines = []
+        for intent, entry in sorted(controls.items()):
+            control = entry.get("control", "?")
+            chords = bindings.get(control)
+            chord = chords[0] if chords else ("?" if aircraft else "-")
+            phrases = ", ".join('"%s"' % p for p in entry.get("phrases", []))
+            lines.append("%-22s %-10s %s" % (control, chord, phrases))
+
+        if not lines:
+            lines = ["no controls configured"]
+        elif not aircraft:
+            lines.append("")
+            lines.append("Key combinations appear once a mission reports your aircraft.")
+        self._cockpit_write("\n".join(lines))
+        self.cockpit_path.config(text="Reading the control list from %s" % folder)
+
+    def _reread_bindings(self):
+        """After rebinding something in DCS's own options."""
+        if getattr(self, "_bindings_cache", None):
+            self._bindings_cache.forget()
+            self._enqueue("voice", "bindings will be re-read on the next command")
+        self._refresh_cockpit_controls()
+
+    def _reset_cockpit_controls(self):
+        if not messagebox.askyesno(
+                "Use shipped controls",
+                "Replace your control list with the version that came with this "
+                "build?\n\nAny phrases you changed yourself will be lost."):
+            return
+        atcai_cockpit.refresh_user_controls()
+        self._enqueue("app", "control list reset to the shipped version")
+        self._refresh_cockpit_controls()
+
     def _build_settings(self, tabs):
         tab = ttk.Frame(tabs, padding=PAD)
         tabs.add(tab, text="Settings")
@@ -541,6 +722,9 @@ class App(ttk.Frame):
         self.atis_frequency.set(str(self.prefs["atis_frequency"]))
         self.comms_keys_enabled.set(bool(self.prefs["comms_keys_enabled"]))
         self.send_keys_enabled.set(bool(self.prefs["send_keys_enabled"]))
+        self.cockpit_enabled.set(bool(self.prefs["cockpit_keys_enabled"]))
+        self.cockpit_send.set(bool(self.prefs["cockpit_send_enabled"]))
+        self.cockpit_confidence.set(float(self.prefs["cockpit_confidence"]))
         self._on_atis_changed()
 
         started = []
@@ -577,6 +761,9 @@ class App(ttk.Frame):
             "atis_frequency": self.atis_frequency.get().strip() or "380.000",
             "comms_keys_enabled": bool(self.comms_keys_enabled.get()),
             "send_keys_enabled": bool(self.send_keys_enabled.get()),
+            "cockpit_keys_enabled": bool(self.cockpit_enabled.get()),
+            "cockpit_send_enabled": bool(self.cockpit_send.get()),
+            "cockpit_confidence": round(float(self.cockpit_confidence.get()), 2),
         })
         prefs.save(self.prefs)
 
@@ -1138,6 +1325,10 @@ class App(ttk.Frame):
             ptt_key_name=str(self.ptt_key_name),
             comms_keys=bool(self.comms_keys_enabled.get()),
             send_keys=bool(self.send_keys_enabled.get()),
+            cockpit_keys=bool(self.cockpit_enabled.get()),
+            cockpit_send=bool(self.cockpit_send.get()),
+            cockpit_confidence=round(self.cockpit_confidence.get(), 2),
+            bindings_cache=self._bindings(),
             dcs_log=(str(self.installation.path / "Logs" / "dcs.log")
                      if self.installation else None),
         )

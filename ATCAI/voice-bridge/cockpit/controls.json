@@ -1,0 +1,99 @@
+{
+  "comments": [
+    "Which spoken phrases work which DCS cockpit control.",
+    "",
+    "The 'control' field is a DCS control NAME, not a key, and must match DCS's own",
+    "spelling exactly - 'Navigation lights' has a lowercase L, 'Airbrake' is one word.",
+    "The keys come from DCS's binding files, so if you rebind a control in the game's",
+    "options this file needs no change: press 'Re-read bindings' in the manager.",
+    "",
+    "A control your aircraft does not have is simply absent from its bindings, and the",
+    "command refuses itself. Nothing here needs to be per-aircraft.",
+    "",
+    "Edit the 'phrases' lists to change what you say, then stop and start listening so",
+    "the recogniser rebuilds its grammar.",
+    "",
+    "'requires' is checked against what the mission publishes. onGround==0 means",
+    "airborne, onGround==1 means on the ground.",
+    "",
+    "Destructive controls - eject, jettison, engine shutdown, weapons release, master",
+    "arm, countermeasures - are refused in code even if named here.",
+    "",
+    "Some controls are toggles rather than explicit up/down, because that is all DCS",
+    "exposes a literal key for. A toggle is only safe where you can see the result:",
+    "flaps and canopy you can, which is why they are toggles and the gear is not.",
+    "",
+    "A note on 'airbrake on' / 'airbrake off': those two phrasings are one word apart",
+    "with opposite effects, and were never measured. 'out' / 'in' are phonetically",
+    "further apart and are the safer pair. If the recogniser ever confuses on and off,",
+    "delete those two phrases - nothing else depends on them. To check first:",
+    "  python tools/phrase_separability.py \"airbrake on\" \"airbrake off\"",
+    "The gear phrases were measured across twenty utterances with zero confusions."
+  ],
+  "controls": {
+    "cockpit_gear_up": {
+      "control": "Landing Gear Up",
+      "requires": [
+        "onGround==0"
+      ],
+      "refusal": "not while you're on the ground",
+      "phrases": [
+        "gear up",
+        "gear coming up",
+        "raise the gear"
+      ]
+    },
+    "cockpit_gear_down": {
+      "control": "Landing Gear Down",
+      "phrases": [
+        "gear down",
+        "gear coming down",
+        "lower the gear"
+      ]
+    },
+    "cockpit_flaps": {
+      "control": "Flaps Up/Down",
+      "refusal": "this aircraft has no flaps binding",
+      "phrases": [
+        "flaps",
+        "toggle flaps",
+        "flaps now"
+      ]
+    },
+    "cockpit_airbrake_out": {
+      "control": "Airbrake On",
+      "phrases": [
+        "airbrake out",
+        "speed brake out",
+        "airbrake on"
+      ]
+    },
+    "cockpit_airbrake_in": {
+      "control": "Airbrake Off",
+      "phrases": [
+        "airbrake in",
+        "speed brake in",
+        "airbrake off"
+      ]
+    },
+    "cockpit_canopy": {
+      "control": "Canopy Open/Close",
+      "requires": [
+        "onGround==1"
+      ],
+      "refusal": "not in flight - the canopy would not survive it",
+      "phrases": [
+        "canopy",
+        "open the canopy",
+        "close the canopy"
+      ]
+    },
+    "cockpit_nav_lights": {
+      "control": "Navigation lights",
+      "phrases": [
+        "nav lights",
+        "navigation lights"
+      ]
+    }
+  }
+}

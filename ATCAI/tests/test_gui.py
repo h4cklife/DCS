@@ -139,7 +139,7 @@ class TestTabLayout:
     def test_each_job_has_its_own_tab(self, gui):
         assert self._tab_names(gui) == [
             "Setup", "Talking to ATC", "Test Microphone", "Hearing ATC",
-            "Comms Keys", "Settings", "Log",
+            "Comms Keys", "AI Cockpit", "Settings", "Log",
         ]
 
     def test_the_log_lives_in_a_tab_not_under_every_tab(self, gui):
@@ -236,7 +236,11 @@ class TestSendKeysControls:
         gui.send_keys_enabled.set(True)
         gui._on_send_keys_toggled()
         gui._drain()
-        assert "PRESSED" in gui.log_view.get("1.0", "end")
+        logged = gui.log_view.get("1.0", "end")
+        assert "PRESSING FOR REAL" in logged
+        # Both wordings - "takes effect when you start" and "for this to take effect" -
+        # contain "effect"; asserting the shorter form covers either path.
+        assert "effect" in logged, "it must say when the change applies"
 
     def test_turning_it_off_says_so_too(self, gui):
         gui.send_keys_enabled.set(False)
@@ -256,6 +260,108 @@ class TestSendKeysControls:
         gui._drain()
         assert "nothing sent" in gui.keys_focus.cget("text")
         assert "chrome.exe" in gui.log_view.get("1.0", "end")
+
+
+class TestCockpitTab:
+    """The tab exists to answer "what do I say" and "what will it press" on one
+    screen, and to make clear the keys come from DCS rather than from here."""
+
+    def test_the_controls_exist(self, gui):
+        for name in ("cockpit_enabled", "cockpit_send", "cockpit_confidence",
+                     "cockpit_controls", "cockpit_path", "cockpit_aircraft"):
+            assert hasattr(gui, name), name
+
+    def test_both_switches_default_to_off(self, gui):
+        assert gui.cockpit_enabled.get() is False
+        assert gui.cockpit_send.get() is False
+
+    def test_its_confidence_is_separate_from_atcs(self, gui):
+        """A wrong cockpit command costs more than a wrong ATC request, so the two
+        thresholds must not share a setting."""
+        gui.cockpit_confidence.set(0.9)
+        assert gui.confidence.get() != 0.9
+
+    def test_the_control_list_shows_phrases_and_the_control_name(self, gui):
+        gui._refresh_cockpit_controls()
+        shown = gui.cockpit_controls.get("1.0", "end")
+        assert "Landing Gear Up" in shown
+        assert '"gear up"' in shown
+
+    def test_it_names_the_folder_it_reads_from(self, gui):
+        gui._refresh_cockpit_controls()
+        assert "Reading the control list from" in gui.cockpit_path.cget("text")
+
+    def test_it_says_when_chords_are_not_known_yet(self, gui):
+        """Before a mission reports the aircraft there are no bindings, and saying so
+        beats showing a blank column."""
+        gui._cockpit_last_aircraft = None
+        gui._refresh_cockpit_controls()
+        assert "once a mission reports" in gui.cockpit_controls.get("1.0", "end")
+
+    def test_turning_on_real_sending_says_so(self, gui):
+        gui.cockpit_send.set(True)
+        gui._on_cockpit_send_toggled()
+        gui._drain()
+        assert "PRESSING FOR REAL" in gui.log_view.get("1.0", "end")
+
+    def test_resetting_the_control_list_asks_first(self, gui, monkeypatch):
+        import app
+        asked = []
+        monkeypatch.setattr(app.messagebox, "askyesno",
+                            lambda t, m: asked.append(m) or False)
+        called = []
+        monkeypatch.setattr(app.atcai_cockpit, "refresh_user_controls",
+                            lambda: called.append(1) or [])
+        gui._reset_cockpit_controls()
+        assert asked and "lost" in asked[0]
+        assert not called
+
+    def test_the_listener_is_told_the_cockpit_settings(self, gui, monkeypatch):
+        import app
+        captured = {}
+        monkeypatch.setattr(app.atcai_listen, "run",
+                            lambda options, on_log=None, should_stop=None:
+                            captured.update(vars(options)))
+        gui.cockpit_enabled.set(True)
+        gui.cockpit_send.set(False)
+        gui.cockpit_confidence.set(0.8)
+        gui._run_listener(None, lambda m: None, lambda: True)
+        assert captured["cockpit_keys"] is True
+        assert captured["cockpit_send"] is False
+        assert captured["cockpit_confidence"] == 0.8
+
+
+class TestEveryVoiceSwitchSaysItNeedsARestart:
+    """The recogniser reads its settings once, at start. A switch that silently does
+    nothing until then is indistinguishable from a broken feature - which is exactly
+    how the cockpit switch cost a test flight."""
+
+    def test_the_listen_switches_say_so(self, gui):
+        gui._on_voice_switch_toggled("comms menu commands", True)
+        gui._on_voice_switch_toggled("cockpit commands", True)
+        gui._drain()
+        logged = gui.log_view.get("1.0", "end")
+        assert "comms menu commands on" in logged
+        assert "cockpit commands on" in logged
+        assert logged.count("effect") >= 2, "each switch must say when it applies"
+
+    def test_it_says_start_when_not_yet_listening(self, gui):
+        assert not gui.listener.running
+        gui._on_voice_switch_toggled("cockpit commands", True)
+        gui._drain()
+        assert "when you start listening" in gui.log_view.get("1.0", "end")
+
+    def test_it_says_restart_when_already_listening(self, gui, monkeypatch):
+        monkeypatch.setattr(type(gui.listener), "running",
+                            property(lambda self: True))
+        gui._on_voice_switch_toggled("cockpit commands", True)
+        gui._drain()
+        assert "restart listening" in gui.log_view.get("1.0", "end")
+
+    def test_turning_one_off_says_so(self, gui):
+        gui._on_voice_switch_toggled("cockpit commands", False)
+        gui._drain()
+        assert "cockpit commands off" in gui.log_view.get("1.0", "end")
 
 
 class TestSettingsShowTheirValues:

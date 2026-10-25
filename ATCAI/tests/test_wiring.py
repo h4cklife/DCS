@@ -114,7 +114,10 @@ class TestConfigDefaults:
     """The manager shows these to the player as "what it is now", so a copy that has
     drifted from the Lua is worse than no copy at all."""
 
-    @pytest.fixture(scope="class")
+    # Function-scoped: a class-scoped fixture defined as an instance method is
+    # deprecated and becomes an error in pytest 10. Re-reading one Lua file per test
+    # costs nothing worth optimising.
+    @pytest.fixture
     def lua_defaults(self):
         core = (ATC_DIR / "atc_core.lua").read_text(encoding="utf-8")
         found = {}

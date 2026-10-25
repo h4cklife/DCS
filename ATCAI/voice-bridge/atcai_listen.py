@@ -123,6 +123,18 @@ def comms_intents():
 def is_comms_intent(intent):
     return bool(intent) and intent in comms_intents()
 
+
+def cockpit_intents():
+    try:
+        import atcai_cockpit
+        return atcai_cockpit.cockpit_intents()
+    except Exception:                                    # no map, or unreadable
+        return set()
+
+
+def is_cockpit_intent(intent):
+    return bool(intent) and intent in cockpit_intents()
+
 # Leading verbs people swap between without thinking. Each pair is expanded both ways.
 VERB_VARIANTS = (("request", "requesting"), ("report", "reporting"),
                  ("declare", "declaring"))
@@ -193,6 +205,26 @@ def phrase_to_intent(on_log=None):
     if conflicts and on_log:
         for phrase, first, second in conflicts:
             on_log('! "%s" means %s in one key map and %s in another - ignoring it'
+                   % (phrase, first, second))
+
+    try:
+        import atcai_cockpit
+        cockpit_phrases, cockpit_conflicts = atcai_cockpit.all_phrases()
+    except Exception:
+        return lookup
+
+    for phrase, intent in cockpit_phrases.items():
+        for variant in expand_phrases([phrase]):
+            if variant in lookup and lookup[variant] != intent:
+                if on_log:
+                    on_log('! "%s" is claimed by both %s and %s - keeping %s'
+                           % (variant, lookup[variant], intent, lookup[variant]))
+                continue
+            lookup[variant] = intent
+
+    if cockpit_conflicts and on_log:
+        for phrase, first, second in cockpit_conflicts:
+            on_log('! "%s" means both %s and %s in the control list - ignoring it'
                    % (phrase, first, second))
     return lookup
 
@@ -278,6 +310,62 @@ class StateWatcher(object):
             if summary != last:
                 last = summary
                 self.on_log("mission state: %s" % summary)
+
+
+def _handle_cockpit(intent, text, confidence, watcher, args, say):
+    """A cockpit control. Its own confidence floor, and dry run unless told otherwise."""
+    try:
+        import atcai_cockpit
+    except ImportError as exc:
+        say("! cockpit commands unavailable: %s" % exc)
+        return
+
+    if not getattr(args, "cockpit_keys", False):
+        say('~ "%s" -> %s: cockpit commands are turned off' % (text, intent))
+        return
+
+    # Checked separately from ATC's threshold: a miss here costs a retry, a false
+    # positive moves a control you did not ask about.
+    floor = getattr(args, "cockpit_confidence", atcai_cockpit.DEFAULT_CONFIDENCE)
+    if confidence < floor:
+        say('~ heard "%s" (%.2f) - below the cockpit threshold of %.2f, ignoring'
+            % (text, confidence, floor))
+        return
+
+    state = watcher.state or {}
+    bindings = {}
+    cache = getattr(args, "bindings_cache", None)
+    if cache is not None:
+        try:
+            bindings = cache.get(state.get("aircraft"))
+        except Exception as exc:
+            say("! could not read the bindings: %r" % exc)
+            return
+
+    resolution = atcai_cockpit.resolve(intent, watcher.state, bindings, enabled=True)
+    if not resolution.ok:
+        say('~ "%s" -> %s: %s' % (text, intent, resolution.reason))
+        return
+
+    described = atcai_cockpit.describe(resolution)
+
+    if not getattr(args, "cockpit_send", False):
+        say('-> "%s" (%.2f) -> %s | would press: %s'
+            % (text, confidence, intent, described))
+        return
+
+    try:
+        import atcai_sendkeys
+    except ImportError as exc:
+        say("! cannot send keys: %s" % exc)
+        return
+
+    sender = atcai_sendkeys.SendKeys()
+    if sender.send(resolution.keys, 90):
+        say('-> "%s" (%.2f) -> %s | pressed: %s'
+            % (text, confidence, intent, described))
+    else:
+        say('~ "%s" -> %s not sent: %s' % (text, intent, sender.last_error))
 
 
 def _handle_comms(intent, text, confidence, watcher, args, say):
@@ -423,6 +511,8 @@ def build_options(**overrides):
         inbox=None, min_confidence=0.6, strict=False,
         ptt_enabled=False, ptt_key_code=0x11, ptt_key_name="Left Ctrl",
         comms_keys=False, send_keys=False, dcs_log=None,
+        cockpit_keys=False, cockpit_send=False, cockpit_confidence=0.70,
+        bindings_cache=None,
     )
     defaults.update(overrides)
     return argparse.Namespace(**defaults)
@@ -528,6 +618,10 @@ def run(args, on_log=None, should_stop=None):
                 continue
             if not ptt.was_talking():
                 say('~ heard "%s" but the push-to-talk key was not held' % text)
+                continue
+
+            if is_cockpit_intent(intent):
+                _handle_cockpit(intent, text, confidence, watcher, args, say)
                 continue
 
             if is_comms_intent(intent):

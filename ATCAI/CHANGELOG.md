@@ -1,5 +1,47 @@
 # Changelog
 
+## 1.6.0 - 2026-10-25
+
+### For players
+
+- **Work cockpit controls by voice.** Say "gear up", "gear down", "flaps", "airbrake
+  out", "canopy" or "nav lights" and ATCAI presses the key for you. A new **AI Cockpit**
+  tab, off by default behind two switches like the comms keys.
+
+- **The key combinations come from DCS, not from ATCAI.** They are read out of your own
+  binding files, including anything you have rebound — so if you have gear on a different
+  key than standard, it already works. Change a binding in DCS's options and press
+  **Re-read bindings**.
+
+- **It knows when not to.** "Gear up" is refused while you are on the ground, and
+  "canopy" is refused in flight. "Gear down" is allowed on the ground, because lowering
+  gear you already have down is harmless.
+
+- **Destructive controls are refused in code** — eject, jettison, engine shutdown,
+  weapons release, master arm, countermeasures. Not merely left out of the list: they
+  cannot be enabled by editing it, because the failure is unrecoverable in a way a wrong
+  menu press is not.
+
+- **Its own confidence setting**, separate from ATC's. "Gear up" and "gear down" differ
+  by one word and have opposite effects, so the bar for acting on them is set apart from
+  the bar for answering a radio call.
+
+- Phrases are yours to change, in `%LOCALAPPDATA%\ATCAI\cockpit\controls.json`.
+
+### Fixed
+
+- **Every voice switch now says when it takes effect.** The recogniser reads its
+  settings once, when listening starts, so ticking a box did nothing until you stopped
+  and started — and said nothing about it, which is indistinguishable from a broken
+  feature. All four switches now report the change and whether a restart is needed.
+
+### Known limitations
+
+- Wheel brakes were dropped. DCS exposes them as separate left/right toggles, which
+  reads badly as speech, and brakes belong under your hand rather than your voice.
+- Nothing confirms a control actually moved. DCS reports neither, so the log can only
+  say the keystroke was accepted.
+
 ## 1.5.0 - 2026-10-25
 
 ### For players

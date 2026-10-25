@@ -28,6 +28,12 @@ SCANCODES = {
     "F1": 0x3B, "F2": 0x3C, "F3": 0x3D, "F4": 0x3E, "F5": 0x3F, "F6": 0x40,
     "F7": 0x41, "F8": 0x42, "F9": 0x43, "F10": 0x44, "F11": 0x57, "F12": 0x58,
     "escape": 0x01, "esc": 0x01,
+    # Modifiers. DCS calls these "reformers" in its binding files and writes them
+    # LShift / LCtrl / LAlt, so those spellings are accepted as-is.
+    "lshift": 0x2A, "rshift": 0x36,
+    "lctrl": 0x1D, "lcontrol": 0x1D,
+    "lalt": 0x38, "lmenu": 0x38,
+    "rcontrol": 0x1D, "rmenu": 0x38,
     "backslash": 0x2B, "\\": 0x2B,
     "grave": 0x29, "`": 0x29,
     "ralt": 0x38, "rctrl": 0x1D,
@@ -51,7 +57,11 @@ INPUT_KEYBOARD = 1
 
 # F11/F12 and a few others are extended keys; the flag has to be set or they arrive
 # as something else.
-EXTENDED = {"F11", "F12", "rctrl", "ralt"}
+EXTENDED = {"F11", "F12", "rctrl", "ralt", "rcontrol", "rmenu"}
+
+# DCS writes a chord as modifiers plus one key. Accepting its own spelling means a
+# binding read out of its files needs no translation: "LCtrl+G" goes straight through.
+CHORD_SEPARATOR = "+"
 
 PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
 
@@ -79,9 +89,35 @@ def is_extended(name):
     return str(name or "").lower() in _EXTENDED_LOWER
 
 
+def parse_chord(name):
+    """"LCtrl+G" -> (["lctrl"], "g"). A plain key gives ([], "g").
+
+    The last element is the key; everything before it is held while it is tapped. Split
+    this way rather than by looking modifiers up, so an unknown name fails as an unknown
+    key rather than being silently treated as a modifier.
+    """
+    parts = [p.strip() for p in str(name or "").split(CHORD_SEPARATOR) if p.strip()]
+    if not parts:
+        return [], None
+    return [p.lower() for p in parts[:-1]], parts[-1]
+
+
 def unknown_keys(keys):
-    """Which of these key names we cannot send. Empty means the sequence is sendable."""
-    return [k for k in (keys or []) if scancode_for(k) is None]
+    """Which of these key names we cannot send. Empty means the sequence is sendable.
+
+    Chords are checked part by part, so "LCtrl+F13" reports the F13 rather than passing
+    because the chord as a whole looked unfamiliar.
+    """
+    missing = []
+    for entry in keys or []:
+        modifiers, key = parse_chord(entry)
+        if key is None:
+            missing.append(str(entry))
+            continue
+        for part in modifiers + [key]:
+            if scancode_for(part) is None:
+                missing.append(part)
+    return missing
 
 
 # ---------- the Windows plumbing, isolated so everything above stays testable ----------
@@ -137,20 +173,41 @@ def foreground_process():
         return None
 
 
-def _tap(scancode, extended, hold_ms):
+def _press(scancode, extended, up=False):
     flags = KEYEVENTF_SCANCODE | (KEYEVENTF_EXTENDEDKEY if extended else 0)
-    down = _INPUT(type=INPUT_KEYBOARD,
+    if up:
+        flags |= KEYEVENTF_KEYUP
+    item = _INPUT(type=INPUT_KEYBOARD,
                   union=_INPUTunion(ki=_KEYBDINPUT(0, scancode, flags, 0, None)))
-    up = _INPUT(type=INPUT_KEYBOARD,
-                union=_INPUTunion(ki=_KEYBDINPUT(
-                    0, scancode, flags | KEYEVENTF_KEYUP, 0, None)))
+    return _user32.SendInput(1, ctypes.byref(item), ctypes.sizeof(_INPUT)) == 1
 
-    sent = _user32.SendInput(1, ctypes.byref(down), ctypes.sizeof(_INPUT))
-    if sent != 1:
+
+def _tap(scancode, extended, hold_ms):
+    if not _press(scancode, extended):
         return False
     time.sleep(max(hold_ms, 1) / 1000.0)
-    sent = _user32.SendInput(1, ctypes.byref(up), ctypes.sizeof(_INPUT))
-    return sent == 1
+    return _press(scancode, extended, up=True)
+
+
+def _chord(modifiers, key, hold_ms):
+    """Hold the modifiers, tap the key, release in reverse order.
+
+    Modifiers are released in reverse and in a finally, so a failure part-way cannot
+    leave Ctrl or Shift stuck down - which would affect every keystroke the player makes
+    afterwards, in or out of the game.
+    """
+    held = []
+    try:
+        for name in modifiers:
+            if not _press(scancode_for(name), is_extended(name)):
+                return False
+            held.append(name)
+            time.sleep(max(hold_ms, 1) / 1000.0)
+        return _tap(scancode_for(key), is_extended(key), hold_ms)
+    finally:
+        for name in reversed(held):
+            _press(scancode_for(name), is_extended(name), up=True)
+            time.sleep(max(hold_ms, 1) / 1000.0)
 
 
 class SendKeys(object):
@@ -165,7 +222,10 @@ class SendKeys(object):
     def __init__(self, target_process=DCS_PROCESS, sender=None, focus=None,
                  hold_ms=30, sleep=None):
         self.target_process = (target_process or DCS_PROCESS).lower()
-        self._sender = sender or (lambda code, extended: _tap(code, extended, hold_ms))
+        # A sender takes (modifiers, key) so a chord is one indivisible action: the
+        # modifiers must be released by whoever pressed them.
+        self._sender = sender or (
+            lambda modifiers, key: _chord(modifiers, key, hold_ms))
         self._focus = focus or foreground_process
         self._sleep = sleep or time.sleep
         self.sent = []
@@ -200,7 +260,8 @@ class SendKeys(object):
                 self.last_error = ("focus left DCS part-way through - stopped after "
                                    "%d of %d keys" % (index, len(keys)))
                 return False
-            if not self._sender(scancode_for(key), is_extended(key)):
+            modifiers, plain = parse_chord(key)
+            if not self._sender(modifiers, plain):
                 self.last_error = "Windows refused the keystroke for %s" % key
                 return False
             self.sent.append(key)

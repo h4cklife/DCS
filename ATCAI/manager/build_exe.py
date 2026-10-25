@@ -29,6 +29,8 @@ BUNDLED = [
     (ROOT / "voice-bridge" / "mictest.ps1", "voice-bridge"),
     (ROOT / "voice-bridge" / "micselect.ps1", "voice-bridge"),
     (ROOT / "voice-bridge" / "keymaps", "voice-bridge/keymaps"),
+    (ROOT / "voice-bridge" / "cockpit", "voice-bridge/cockpit"),
+    (ROOT / "voice-bridge" / "readbindings.lua", "voice-bridge"),
 ]
 
 
