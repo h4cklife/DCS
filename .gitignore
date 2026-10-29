@@ -12,3 +12,9 @@ __pycache__/
 # Generated at runtime inside a DCS install, never committed
 inbox.lua
 config.lua
+
+# Windows mark-of-the-web leftovers. These are NTFS alternate data streams that WSL
+# surfaces as real files, and the ':' in the name is illegal on Windows - committing one
+# makes actions/checkout fail with "invalid path" on the windows-latest runner, before
+# any test can run. That is what broke the atcai-v1.8.0 release build.
+*:Zone.Identifier

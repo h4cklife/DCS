@@ -187,6 +187,58 @@ class TestPackaging:
         # And the content really loads, not just the path resolving.
         assert atcai_phrases.load_defaults(), "the ATC phrase list came back empty"
 
+    def test_no_tracked_path_is_illegal_on_windows(self):
+        """The release is built on windows-latest, so a path Windows cannot create stops
+        the build before a single test runs.
+
+        It already did: two `*.png:Zone.Identifier` files - Windows mark-of-the-web
+        leftovers that WSL materialises as real files - were committed, and
+        actions/checkout failed with "invalid path" and exit code 128. Nothing about the
+        code was wrong and no test could have failed, because the checkout never
+        finished.
+
+        Checks the same three things Windows itself rejects: the illegal characters,
+        trailing dots or spaces, and the reserved device names.
+        """
+        import subprocess
+        try:
+            # From the repository root, not ATCAI's folder: checkout fails on an illegal
+            # path anywhere in the tree, and the two that broke the build lived in the
+            # parent repo's assets/ - so a listing scoped to ATCAI/ saw nothing wrong,
+            # which is how this test passed on its first run while the build was failing.
+            top = subprocess.run(["git", "rev-parse", "--show-toplevel"], cwd=str(ROOT),
+                                 capture_output=True, text=True, timeout=60)
+            if top.returncode != 0:
+                pytest.skip("not a git checkout")
+            listing = subprocess.run(
+                ["git", "ls-files", "-z"], cwd=top.stdout.strip(),
+                capture_output=True, text=True, timeout=60)
+        except (OSError, subprocess.SubprocessError):
+            pytest.skip("git is not available here")
+        if listing.returncode != 0:
+            pytest.skip("not a git checkout")
+
+        illegal = re.compile(r'[<>:"|?*\x00-\x1f]')
+        reserved = {"CON", "PRN", "AUX", "NUL"}
+        reserved |= {"COM%d" % n for n in range(1, 10)}
+        reserved |= {"LPT%d" % n for n in range(1, 10)}
+
+        bad = []
+        for path in filter(None, listing.stdout.split("\0")):
+            for part in path.split("/"):
+                if illegal.search(part):
+                    bad.append("%s (illegal character)" % path)
+                elif part.rstrip() != part or part.rstrip(".") != part:
+                    bad.append("%s (trailing space or dot)" % path)
+                elif part.split(".")[0].upper() in reserved:
+                    bad.append("%s (reserved device name)" % path)
+                else:
+                    continue
+                break
+        assert not bad, (
+            "these cannot be checked out on Windows, so the release build will fail "
+            "before it starts: %s" % bad)
+
     def test_the_lua_the_bindings_reader_needs_is_bundled(self):
         """Named explicitly as well: without it, cockpit commands cannot find a single
         key combination, and the only symptom is every control reading as unknown."""
