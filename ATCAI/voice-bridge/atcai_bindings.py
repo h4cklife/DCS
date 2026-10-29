@@ -137,7 +137,12 @@ def read(aircraft, dcs_install, dcs_writedir=None, on_log=None):
     # Not a problem worth surfacing per control - these indirect through DCS's device
     # tables and are skipped deliberately rather than guessed at.
     if unresolved:
-        say("%d control(s) have no literal key and were skipped" % len(unresolved))
+        # Now that DCS's keyboard defaults are resolved, what is left is genuinely
+        # not a key - a joystick axis or button, which ATCAI cannot press. Saying
+        # "no literal key" was true but read as "unbound", and that cost a round of
+        # debugging when flaps were bound all along.
+        say("%d control(s) are bound to a stick or axis rather than a key, so "
+            "they cannot be used by voice" % len(unresolved))
 
     return bindings, problems
 

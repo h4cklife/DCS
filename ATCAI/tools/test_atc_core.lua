@@ -520,6 +520,69 @@ do
     eq(ATC.getState(fakeUnit:getName()).phase, ATC.PHASE.INBOUND, "and put on approach")
 end
 
+print("a repeat declaration is silent")
+do
+    -- The measured failure: 22 false triggers in ten minutes produced 8 transmissions,
+    -- because nothing checked whether an emergency was already running. The second call
+    -- must cost nothing at all - not a refusal, not an acknowledgement.
+    scenario.airborne = true
+    reset(ATC.PHASE.AIRBORNE)
+    ATC.declareEmergency(params)
+    eq(#spoken, 1, "the first declaration is answered")
+
+    ATC.declareEmergency(params)
+    eq(#spoken, 1, "the second says nothing")
+    eq(#transmissions, 1, "and transmits nothing")
+    eq(ATC.getState(fakeUnit:getName()).emergency, true, "the emergency still stands")
+
+    -- Three more, as the recogniser would have produced them.
+    ATC.declareEmergency(params)
+    ATC.declareEmergency(params)
+    ATC.declareEmergency(params)
+    eq(#spoken, 1, "and nor do any that follow")
+end
+
+print("cancelling an emergency")
+do
+    scenario.airborne = true
+    reset(ATC.PHASE.AIRBORNE)
+    ATC.declareEmergency(params)
+    ATC.cancelEmergency(params)
+
+    local said = lastSpoken()
+    contains(said, "cancelling your emergency", "the cancellation is acknowledged")
+    eq(ATC.getState(fakeUnit:getName()).emergency, nil, "and the flag is cleared")
+
+    -- The point of having it at all: a false declaration must not lock out a real one
+    -- for the rest of the sortie, now that repeats are silent.
+    reset(ATC.PHASE.AIRBORNE)
+    ATC.declareEmergency(params)
+    ATC.cancelEmergency(params)
+    ATC.declareEmergency(params)
+    contains(lastSpoken(), "roger your emergency",
+        "a declaration after a cancellation is answered again")
+end
+
+print("cancelling when nothing was declared")
+do
+    scenario.airborne = true
+    reset(ATC.PHASE.AIRBORNE)
+    ATC.cancelEmergency(params)
+    contains(lastSpoken(), "no emergency on record", "says so rather than staying silent")
+end
+
+print("cancelling leaves the phase alone")
+do
+    -- Deliberate: "the emergency is over" is not "forget where I am". By this point the
+    -- pilot may genuinely be inbound, and resetting it would strand them.
+    scenario.airborne = true
+    reset(ATC.PHASE.AIRBORNE)
+    ATC.declareEmergency(params)
+    eq(ATC.getState(fakeUnit:getName()).phase, ATC.PHASE.INBOUND, "declaring sets inbound")
+    ATC.cancelEmergency(params)
+    eq(ATC.getState(fakeUnit:getName()).phase, ATC.PHASE.INBOUND, "cancelling keeps it")
+end
+
 print("an emergency is heard from outside normal ATC range")
 do
     -- The situation the call exists for: too far out for anyone to be talking to you.

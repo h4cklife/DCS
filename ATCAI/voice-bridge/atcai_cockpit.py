@@ -145,6 +145,28 @@ def controls_dir():
     return bundled_dir()
 
 
+def missing_user_controls(directory=None, bundled=None):
+    """Controls the shipped list has that the player's copy does not.
+
+    Seeding only ever *adds a file*, never merges into one that already exists, so a
+    player who got their copy when the list held two controls keeps two controls for
+    ever. That is not hypothetical: it hid four shipped controls - flaps, airbrake,
+    canopy and lights - from a tester for weeks, and the only symptom was that saying
+    "flaps" did nothing, which is indistinguishable from a recognition problem.
+
+    Reported rather than merged, because the player's file is theirs: they may have
+    deleted a control deliberately. "Use shipped controls" is the fix, and it asks first.
+    """
+    try:
+        theirs = set(load_controls(directory or user_dir()))
+        ours = set(load_controls(bundled or bundled_dir()))
+    except Exception:
+        return []
+    if not theirs or not ours:
+        return []                       # nothing seeded yet, or no shipped list to compare
+    return sorted(ours - theirs)
+
+
 def load_controls(directory=None):
     """{intent: entry} from controls.json, or {} if it cannot be read."""
     directory = directory or controls_dir()

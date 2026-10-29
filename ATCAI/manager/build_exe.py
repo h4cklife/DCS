@@ -30,6 +30,9 @@ BUNDLED = [
     (ROOT / "voice-bridge" / "micselect.ps1", "voice-bridge"),
     (ROOT / "voice-bridge" / "keymaps", "voice-bridge/keymaps"),
     (ROOT / "voice-bridge" / "cockpit", "voice-bridge/cockpit"),
+    (ROOT / "voice-bridge" / "phrases", "voice-bridge/phrases"),
+    # Only the shrunk splash, not the 2 MB README banner beside it.
+    (ROOT / "assets" / "ATCAI_Splash.png", "assets"),
     (ROOT / "voice-bridge" / "readbindings.lua", "voice-bridge"),
 ]
 

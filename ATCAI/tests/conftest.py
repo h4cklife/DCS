@@ -55,6 +55,21 @@ def prefs_file(tmp_path, monkeypatch):
     return target
 
 
+@pytest.fixture
+def phrase_overlay_file(tmp_path, monkeypatch):
+    """Redirect the player's phrase changes to a throwaway file.
+
+    Without this, a test that toggles a command writes into the real
+    %LOCALAPPDATA%\\ATCAI - which on a developer's machine is their own customisations.
+    The gui fixture depends on this so no GUI test can reach the real file by omission.
+    """
+    import atcai_phrases
+    target = tmp_path / "phrases.json"
+    monkeypatch.setattr(atcai_phrases, "overlay_dir", lambda: str(tmp_path))
+    monkeypatch.setattr(atcai_phrases, "overlay_path", lambda: str(target))
+    return target
+
+
 # Platform is faked by overriding the one function that decides it, never by patching
 # os.name: pathlib picks WindowsPath vs PosixPath from os.name at construction time, so
 # patching it globally quietly breaks every filesystem check in the test.

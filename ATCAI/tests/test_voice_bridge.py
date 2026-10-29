@@ -74,12 +74,14 @@ class TestIntentMatching:
         ("Chevy 81 report inbound", "inbound"),
         ("Tower Chevy 81 on final runway 13", "landing"),
         ("Chevy 81 requesting weapons status", "loadout"),
-        # Distress calls, as they are actually spoken.
-        ("mayday mayday Chevy 81 engine fire", "emergency"),
+        # Distress calls, as they are actually spoken - three repetitions, which is both
+        # real procedure and the only form that survived measurement.
+        ("mayday mayday mayday Chevy 81 engine fire", "emergency"),
         ("Chevy 81 declaring an emergency", "emergency"),
         ("Chevy 81 declare emergency", "emergency"),
-        ("Tower Chevy 81 pan pan low on fuel", "emergency"),
         ("Chevy 81 requesting emergency landing", "emergency"),
+        ("Chevy 81 cancel my emergency", "cancel_emergency"),
+        ("Tower Chevy 81 disregard my emergency", "cancel_emergency"),
         ("Chevy 81 request vectors home", "vectors"),
         ("Chevy 81 requesting vectors to nearest field", "vectors"),
         ("Chevy 81 request divert", "vectors"),
@@ -92,7 +94,50 @@ class TestIntentMatching:
     def test_a_distress_call_beats_the_request_beside_it(self, lookup):
         """Someone declaring while asking for something else is declaring."""
         assert listen.match_intent(
-            "mayday mayday Chevy 81 request landing", lookup) == "emergency"
+            "mayday mayday mayday Chevy 81 request landing", lookup) == "emergency"
+
+    @pytest.mark.parametrize("spoken", [
+        "mayday",
+        "mayday mayday",
+        "pan pan",
+        "Tower Chevy 81 pan pan low on fuel",
+    ])
+    def test_the_short_distress_forms_are_gone(self, lookup, spoken):
+        """The whole point of the change, so it gets a test that fails if they return.
+
+        These are what a jet, a keyboard and ATCAI's own replies produced 22 times in
+        ten minutes at a median confidence of 0.92. The cost is real and accepted: a
+        two-repetition "mayday mayday" no longer registers, so the drill is three.
+        See docs/FALSE-TRIGGERS-PLAN.md.
+        """
+        assert listen.match_intent(spoken, lookup) is None
+
+    def test_cancelling_does_not_read_as_declaring(self, lookup):
+        """"cancel my emergency" contains the word; it must not contain a phrase."""
+        assert listen.match_intent("Chevy 81 cancel emergency", lookup) == "cancel_emergency"
+
+    def test_a_declaration_beats_a_cancellation_in_the_same_breath(self, lookup):
+        """Deliberately asymmetric: if both land in one utterance, fail toward declaring."""
+        assert listen.match_intent(
+            "cancel emergency mayday mayday mayday", lookup) == "emergency"
+
+    def test_longest_match_wins_among_priority_phrases_too(self):
+        """The bug 1.5 fixed: the loop returned on the first priority phrase it scanned,
+        so which emergency phrase won depended on dict order. Both of these are
+        "emergency", so the old code passed by luck; this asserts the rule instead."""
+        lookup = {"emergency landing": "emergency",
+                  "mayday mayday mayday": "emergency",
+                  "landing": "landing"}
+        best = listen.match_intent("mayday mayday mayday request landing", lookup)
+        assert best == "emergency"
+
+    def test_a_priority_intent_still_beats_a_longer_ordinary_phrase(self):
+        """The reason priority exists at all - length alone would pick the calm half."""
+        lookup = {"mayday mayday mayday": "emergency",
+                  "request taxi to parking immediately": "parking"}
+        assert listen.match_intent(
+            "mayday mayday mayday request taxi to parking immediately",
+            lookup) == "emergency"
 
     def test_declaring_is_expanded_like_the_other_verbs(self):
         expanded = listen.expand_phrases(["declare emergency"])
@@ -253,3 +298,65 @@ class TestPushToTalk:
 
     def test_a_bad_key_code_falls_back_to_ctrl(self):
         assert listen.PushToTalk(enabled=False, key_code=0).key_code == 0x11
+
+
+class TestCommsConfidenceFloor:
+    """Comms-menu commands press keys into DCS exactly as cockpit commands do, but had
+    been sharing ATC's lower threshold. Measured 2026-10-28: music and a door opening
+    produced nine false "flight return to base" commands, two of them at 0.65 and 0.67,
+    and every one of them pressed keys."""
+
+    class Watcher:
+        # Parsed from a real ATCAI_STATE line rather than hand-built, so the fixture
+        # cannot quietly stop matching what the mission publishes.
+        import atcai_keys as _keys
+        state = _keys.parse_state(
+            "ATCAI_STATE|aircraft=F-15C|wingmen=3|onGround=0|awacs=1|awacsnm=42"
+            "|tanker=0|slot2=1|slot3=1|slot4=1")
+
+    def _say(self, lines):
+        return lambda message: lines.append(message)
+
+    def test_a_marginal_recognition_is_not_pressed(self):
+        lines = []
+        args = listen.build_options(comms_keys=True, send_keys=True,
+                                    comms_confidence=0.70)
+        listen._handle_comms("flight_rtb", "flight go home", 0.65, self.Watcher(),
+                             args, self._say(lines))
+        assert any("below the comms threshold" in line for line in lines)
+        assert not any("pressed" in line for line in lines)
+
+    def test_a_clear_recognition_still_gets_through(self, monkeypatch):
+        lines = []
+        pressed = []
+        import atcai_sendkeys
+
+        class FakeSender:
+            last_error = None
+
+            def send(self, keys, delay_ms=90):
+                pressed.append(keys)
+                return True
+
+        monkeypatch.setattr(atcai_sendkeys, "SendKeys", FakeSender)
+        args = listen.build_options(comms_keys=True, send_keys=True,
+                                    comms_confidence=0.70)
+        listen._handle_comms("flight_rtb", "flight return to base", 0.93,
+                             self.Watcher(), args, self._say(lines))
+        assert pressed, "a clear command should still be sent: %s" % lines
+
+    def test_the_floor_does_not_apply_to_a_dry_run(self):
+        """The point of a dry run is seeing what a command would do, so a marginal
+        recognition is worth reporting rather than hiding."""
+        lines = []
+        args = listen.build_options(comms_keys=True, send_keys=False,
+                                    comms_confidence=0.70)
+        listen._handle_comms("flight_rtb", "flight go home", 0.65, self.Watcher(),
+                             args, self._say(lines))
+        assert any("would press" in line for line in lines), lines
+
+    def test_it_defaults_higher_than_atcs(self):
+        """A missed radio call costs a repeat; a false "flight return to base" does not."""
+        options = listen.build_options()
+        assert options.comms_confidence > options.min_confidence
+        assert options.comms_confidence == listen.COMMS_CONFIDENCE

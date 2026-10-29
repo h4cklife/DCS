@@ -1,5 +1,7 @@
 # ATCAI
 
+![ATCAI](assets/ATCAI_Banner.png)
+
 [![ATCAI build](https://img.shields.io/github/actions/workflow/status/h4cklife/DCS/atcai-ci.yml?branch=main&label=build&logo=github)](https://github.com/h4cklife/DCS/actions/workflows/atcai-ci.yml)
 [![Latest release](https://img.shields.io/github/v/release/h4cklife/DCS?filter=atcai-v*&label=release)](https://github.com/h4cklife/DCS/releases)
 [![Downloads](https://img.shields.io/github/downloads/h4cklife/DCS/total?label=downloads)](https://github.com/h4cklife/DCS/releases)
@@ -72,7 +74,20 @@ cockpit and flight commands, which have no menu of their own.
 | "request parking" | Vacate and taxi in |
 | "request loadout" | Your remaining stores, from any distance |
 | "request vectors" | Heading and distance to the nearest friendly field |
-| **"mayday"** / "pan pan" | Priority, immediate clearance, answered at any range |
+| **"mayday mayday mayday"** | Priority, immediate clearance, answered at any range |
+| "cancel emergency" | Lifts it again |
+
+Three repetitions, not one, and "pan pan" is gone. Short distress phrases turned out to
+be the one place where the recogniser's tolerance for noise is actively dangerous: a jet,
+a keyboard and ATCAI's own replies produced 22 false emergency calls in ten minutes. The
+reasoning and the measurements are in [docs/FALSE-TRIGGERS-PLAN.md](docs/FALSE-TRIGGERS-PLAN.md).
+
+A second declaration while one is already running is deliberately silent, so a stray one
+costs a single transmission rather than a tower that keeps re-clearing you — and "cancel
+emergency" exists so a stray one cannot lock out a real call for the rest of the sortie.
+
+**Any of these can be switched off or re-worded** on the Voice Commands tab. See
+[Customising what you say](#customising-what-you-say-voice-commands-tab).
 
 ### Your flight and AWACS
 
@@ -96,7 +111,8 @@ flying.
 |---|---|---|
 | "gear up" | Landing gear up | refused on the ground |
 | "gear down" | Landing gear down | |
-| "flaps" | Flaps up or down, whichever is next | toggle |
+| "flaps up" | Flaps retract | |
+| "flaps down" | Flaps to landing position | |
 | "airbrake out" / "airbrake in" | Airbrake extends / retracts | |
 | "canopy" | Opens or closes | on the ground only |
 | "nav lights" | Navigation lights | toggle |
@@ -105,9 +121,72 @@ flying.
 countermeasures are refused in code and cannot be enabled by editing a file.
 
 Most commands accept several phrasings — "request" and "requesting" are interchangeable
-everywhere, as are "report" and "reporting", and "declare" and "declaring". The full
-lists live in `voice-bridge/keymaps/` and `voice-bridge/cockpit/controls.json`, and are
-yours to edit.
+everywhere, as are "report" and "reporting", and "declare" and "declaring".
+
+### Customising what you say (Voice Commands tab)
+
+Every command above can be **switched off or re-worded**, from the **Voice Commands** tab
+in the Manager. Two different needs, one mechanism:
+
+- **Switching one off** because your room sets it off. A dog, a TV, a passenger or your
+  own engine noise will trip some phrase, and which one is nobody's guess from here. An
+  unticked command is **removed from the recogniser's vocabulary entirely**, so there is
+  nothing left for noise to match — not a phrase that gets heard and then discarded.
+  That distinction matters: a phrase still in the vocabulary can absorb a bark through
+  the surrounding wildcards whatever is done with the result afterwards.
+- **Re-wording one** because you say it differently. "wheels up" instead of "gear up",
+  "weather please" instead of "request airfield information".
+
+**A claim withdrawn.** This section used to say that switching a source off makes
+everything left *more* reliable, because there is less to confuse. The first run that
+could test it said the opposite. With the vocabulary cut from 128 phrases to 38, three
+short comms phrases absorbed background noise nine times in one session — Windows
+returns the best match among the phrases available, so removing competitors can
+concentrate noise on the survivors rather than spreading it thin.
+
+One run with confounds is not proof either way, so treat the size of the vocabulary as
+**unknown ground**. Switch off a command because *that command* misfires or you never
+use it, not to make the rest better. If a room is noisy enough to need more than that,
+**push-to-talk** on the Talking to ATC tab is the only thing that answers it properly:
+nothing is heard unless you are holding the key.
+
+The editor refuses a phrase the grammar cannot carry (punctuation) or one that already
+belongs to another command, and **warns** about a phrase under about eight characters,
+or one that contains or is contained by another. Those are judgement calls you are
+entitled to make — the warning is there so you do not make them by accident, which is
+exactly how this project collected 22 false emergency calls.
+
+Changes take effect when **listening restarts**: the recogniser builds its vocabulary
+once, at start. The tab has a **Restart listening** button for that.
+
+#### Where your changes live, and why not in one file
+
+| File | Holds | Who writes it |
+|---|---|---|
+| `voice-bridge/phrases/atc_defaults.json` | the shipped ATC phrases | us, every release |
+| `voice-bridge/keymaps/*.json`, `cockpit/controls.json` | the shipped comms and cockpit phrases | us, and you if you hand-edit |
+| `%LOCALAPPDATA%\ATCAI\phrases.json` | **only the differences** — what you switched off, removed or added | the Voice Commands tab |
+
+Keeping your changes separate from the defaults is the point, not an accident of
+layout. The obvious design — copy the whole list into your folder on first run, the way
+key maps work — cannot survive an update: once your copy *is* the list, "your edit" and
+"last release's default" are indistinguishable, so a shipped fix either overwrites your
+work or never arrives. `atcai_keys.stale_user_keymaps` exists only because of that
+problem, and all it can do is report it.
+
+Storing just the differences removes the ambiguity. A command you have never touched is
+absent from `phrases.json` and gets whatever the running release ships, so new commands
+and corrected phrasings reach you on their own.
+
+One consequence worth knowing: **the overlay can re-word a command that exists, but it
+cannot create one.** An unknown name in `phrases.json` is ignored. That is what keeps
+phrase editing away from eject, jettison, engine shutdown, master arm, weapons and
+countermeasures — those are refused by *control name* before anything else is
+considered, and there is no command there to re-word. Editing phrases changes what you
+say, never what gets pressed.
+
+Hand-editing `keymaps/` and `controls.json` still works, and still changes what gets
+pressed. The tab only ever writes `phrases.json`.
 
 **Just want to use it?** Read [GETTING-STARTED.md](GETTING-STARTED.md) instead — this
 file is about how it works and how to develop it.
@@ -143,6 +222,9 @@ and roadmap.
 | 17 | Voice control of DCS's own comms menus — wingmen, AWACS | **Done** — verified in-game; off by default, see [docs/COMMS-KEYS-PLAN.md](docs/COMMS-KEYS-PLAN.md) |
 | 18 | Microphone selection, and one Manager at a time | **Done** — ATCAI picks its own microphone instead of following the Windows default |
 | 19 | Cockpit controls by voice — gear, flaps, airbrake, canopy, lights | **Done** — verified in-game; off by default, keys read from DCS's own bindings, see [docs/COCKPIT-PLAN.md](docs/COCKPIT-PLAN.md) |
+| 20 | False triggers on high-consequence commands, and user-customisable commands | **Done** — flown 2026-10-29: the triple mayday was heard at 0.91 and no false declaration occurred in a session of continuous game audio, where the old short forms had produced 22 in ten minutes. Distress phrases changed, a repeat declaration silenced, cancellation added, and a Voice Commands tab for switching commands off or re-wording them. See [docs/VOICE-COMMANDS-PLAN.md](docs/VOICE-COMMANDS-PLAN.md) and [docs/FALSE-TRIGGERS-PLAN.md](docs/FALSE-TRIGGERS-PLAN.md) |
+| 21 | Directional flap commands, and reading DCS's default key assignments | **Built and tested — "flaps up" / "flaps down" not yet flown.** The flap toggle is gone; the reader now resolves DCS's own default-assignment table, which took 29 unreadable F-15C controls to zero |
+| 22 | Startup splash screen | **Done** — confirmed on screen; the Manager opens centred in the same place |
 
 ATCAI loads into **every mission you fly** — stock missions, Instant Action, campaigns —
 with no mission editing at all. See Install.
@@ -521,10 +603,20 @@ and a file left off that list is missing only in the built exe — which is why
 | `voice-bridge/readbindings.lua` | reads DCS's key bindings | stays inside the exe |
 | `voice-bridge/keymaps/*.json` | comms-menu commands per aircraft | copied to `%LOCALAPPDATA%\ATCAI\keymaps\` |
 | `voice-bridge/cockpit/controls.json` | cockpit commands | copied to `%LOCALAPPDATA%\ATCAI\cockpit\` |
+| `voice-bridge/phrases/atc_defaults.json` | what you say to ATC | stays inside the exe — **never copied out** |
+| `assets/ATCAI_Splash.png` | the startup banner | stays inside the exe |
 
 **Only the two JSON groups are copied out**, because they are the only ones a player is
 meant to edit. The scripts run from inside the exe, where nothing can accidentally
 diverge from the build.
+
+`phrases/atc_defaults.json` is the exception that proves the rule. It is editable
+*content*, but it is deliberately **not** copied out, because a full copy in your own
+folder cannot be updated: once it holds the whole list, your edit and last release's
+default are the same bytes in the same place, so a shipped correction either overwrites
+your work or never reaches you. Your changes go to `phrases.json` instead, which holds
+only the differences. See [Customising what you
+say](#customising-what-you-say-voice-commands-tab).
 
 ### The three places ATCAI writes
 
@@ -532,6 +624,7 @@ diverge from the build.
 |---|---|---|
 | `%LOCALAPPDATA%\ATCAI\manager.json` | the Manager's own settings | nothing — kept deliberately |
 | `%LOCALAPPDATA%\ATCAI\keymaps\`, `...\cockpit\` | your editable command lists | nothing — your edits are yours |
+| `%LOCALAPPDATA%\ATCAI\phrases.json` | commands you switched off or re-worded | **Restore all defaults** on the Voice Commands tab |
 | `<Saved Games>\DCS\Scripts\ATCAI\` | the installed mission scripts | **Remove** in the Manager |
 
 Copying out happens **the first time the relevant tab is opened**, and only ever *adds*:
@@ -867,7 +960,13 @@ ATCAI/
 │   ├── app.py              the window: install, enable, settings, voice buttons
 │   ├── installer.py        finds DCS, installs/removes/enables, writes settings
 │   ├── prefs.py            the app's own remembered settings
+│   ├── splash.py           the startup banner. Branding, not a progress bar - see
+│   │                       its docstring for why it cannot cover the real wait
 │   └── build_exe.py        packages it into one self-contained executable
+├── assets/
+│   ├── ATCAI_Banner.png    the README banner, 2172x724. NOT bundled
+│   └── ATCAI_Splash.png    the startup splash, 724x242. Generated from the
+│                           banner by tools/make_splash.py; the only one in the exe
 ├── voice-bridge/
 │   ├── atcai_listen.py     speech recognition -> the mission's inbox
 │   ├── recognize.ps1       the Windows recogniser itself
@@ -877,12 +976,20 @@ ATCAI/
 │   ├── atcai_keys.py       decides which comms-menu keys a command means
 │   ├── atcai_sendkeys.py   the only file that presses keys. Scan codes + the
 │   │                       foreground guard, kept small enough to read in full
+│   ├── atcai_phrases.py    the shipped phrase list, and the player's changes to
+│   │                       it. Kept apart on purpose: see "Customising what you
+│   │                       say". Used by both the listener and the manager, so
+│   │                       the tab cannot disagree with the recogniser
+│   ├── phrases/            atc_defaults.json — what you say to ATC. SHIPPED
+│   │                       DEFAULTS, read-only, never copied out
 │   └── keymaps/            one JSON per aircraft: sequences, conditions, phrases
 │                           (SOURCE copies — compiled into the exe; see above)
 ├── tests/                  pytest: installer, prefs, voice bridge, GUI, and the
 │                           Lua suites run on DCS's own interpreter
 └── tools/
     ├── run_tests.sh        runs everything
+    ├── make_splash.py      shrinks the banner into the splash image. Run it when
+    │                       the banner changes; stdlib only, no Pillow
     ├── test_*.lua          the Lua suites themselves
     ├── test_kill_wingman.lua   TEST HARNESS ONLY: destroys a chosen wingman on
     │                           demand, to exercise how DCS renumbers its menu.

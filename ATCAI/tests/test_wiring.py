@@ -8,6 +8,7 @@ an intent with no handler is a request that is heard and then ignored. These tes
 the only thing that notices.
 """
 
+import os
 import re
 import sys
 
@@ -59,6 +60,12 @@ class TestMenu:
         """Voice is the fast path for a mayday, but it must not be the only path."""
         for func in ("declareEmergency", "requestVectors", "requestStraightIn"):
             assert func in menu, "%s has no comms-menu entry" % func
+
+    def test_an_emergency_can_be_cancelled_without_voice(self, menu):
+        """The one that matters most. If the recogniser declares an emergency the pilot
+        did not, the menu is how they get out of it - including if they have switched the
+        cancel command off, or cannot speak over what is happening."""
+        assert "cancelEmergency" in menu
 
 
 class TestIntents:
@@ -123,6 +130,62 @@ class TestPackaging:
                 missing.append(entry.name)
         assert not missing, (
             "used at runtime but would be missing from the exe: %s" % missing)
+
+    def test_every_module_finds_its_bundled_files_under_meipass(self, tmp_path,
+                                                                monkeypatch):
+        """Being in BUNDLED is only half of it: the code also has to look where
+        PyInstaller actually puts it.
+
+        This is the test that was missing, and it cost a flight test. atcai_phrases
+        resolved its defaults to <_MEIPASS>/phrases/ while BUNDLED lands them at
+        <_MEIPASS>/voice-bridge/phrases/, so in the built exe the ATC phrase list came
+        back empty and ATCAI was deaf to every ATC request - while every test passed,
+        because from source the path happens to be right.
+
+        So: build a fake extraction tree laid out exactly as BUNDLED declares, point
+        _MEIPASS at it, and make each module prove it can find its own file there. The
+        layout comes from BUNDLED itself, so this cannot drift from the real build.
+        """
+        import importlib.util
+        import shutil
+        spec = importlib.util.spec_from_file_location(
+            "build_exe", ROOT / "manager" / "build_exe.py")
+        build_exe = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(build_exe)
+
+        # Reproduce the exe's extraction folder. PyInstaller's --add-data target is
+        # always a DIRECTORY: a file entry lands inside it under its own name, and a
+        # directory entry has its contents copied into it.
+        for source, target in build_exe.BUNDLED:
+            destination = tmp_path / target
+            destination.mkdir(parents=True, exist_ok=True)
+            if source.is_dir():
+                shutil.copytree(source, destination, dirs_exist_ok=True)
+            else:
+                shutil.copy2(source, destination / source.name)
+
+        monkeypatch.setattr(sys, "_MEIPASS", str(tmp_path), raising=False)
+
+        import atcai_cockpit
+        import atcai_keys
+        import atcai_phrases
+        sys.path.insert(0, str(ROOT / "manager"))
+        import splash
+
+        checks = {
+            "the ATC phrase list": atcai_phrases.defaults_path(),
+            "the splash image": splash.image_path(),
+            "recognize.ps1": os.path.join(listen.resource_dir(), "recognize.ps1"),
+            "the shipped key maps": atcai_keys.bundled_keymap_dir(),
+            "the shipped cockpit controls": os.path.join(atcai_cockpit.bundled_dir(), "controls.json"),
+        }
+        missing = ["%s (looked in %s)" % (what, where)
+                   for what, where in checks.items() if not os.path.exists(where)]
+        assert not missing, (
+            "would not be found inside the built exe: %s" % "; ".join(missing))
+
+        # And the content really loads, not just the path resolving.
+        assert atcai_phrases.load_defaults(), "the ATC phrase list came back empty"
 
     def test_the_lua_the_bindings_reader_needs_is_bundled(self):
         """Named explicitly as well: without it, cockpit commands cannot find a single

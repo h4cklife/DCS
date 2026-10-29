@@ -28,36 +28,26 @@
     "further apart and are the safer pair. If the recogniser ever confuses on and off,",
     "delete those two phrases - nothing else depends on them. To check first:",
     "  python tools/phrase_separability.py \"airbrake on\" \"airbrake off\"",
-    "The gear phrases were measured across twenty utterances with zero confusions."
+    "The gear phrases were measured across twenty utterances with zero confusions.",
+    "",
+    "FLAPS: two directional commands, not a toggle. DCS gives all three on the keyboard -",
+    "'Flaps Up/Down' on F, 'Flaps Up' on LCtrl+F, 'Flaps Landing Position' on LShift+F -",
+    "and the toggle was dropped deliberately. Its result depends on current flap position,",
+    "which DCS does not publish, so neither you nor ATCAI can know what it is about to do:",
+    "say 'flaps up' with the flaps already up and a toggle lowers them. Two commands that",
+    "say what they do have no such failure.",
+    "",
+    "If you fly an airframe that only binds the toggle, the directional commands refuse",
+    "themselves with a reason. To get the toggle back, add an entry with control",
+    "'Flaps Up/Down' - and give it a phrase that does not imply a direction."
   ],
   "controls": {
-    "cockpit_gear_up": {
-      "control": "Landing Gear Up",
-      "requires": [
-        "onGround==0"
-      ],
-      "refusal": "not while you're on the ground",
+    "cockpit_airbrake_in": {
+      "control": "Airbrake Off",
       "phrases": [
-        "gear up",
-        "gear coming up",
-        "raise the gear"
-      ]
-    },
-    "cockpit_gear_down": {
-      "control": "Landing Gear Down",
-      "phrases": [
-        "gear down",
-        "gear coming down",
-        "lower the gear"
-      ]
-    },
-    "cockpit_flaps": {
-      "control": "Flaps Up/Down",
-      "refusal": "this aircraft has no flaps binding",
-      "phrases": [
-        "flaps",
-        "toggle flaps",
-        "flaps now"
+        "airbrake in",
+        "speed brake in",
+        "airbrake off"
       ]
     },
     "cockpit_airbrake_out": {
@@ -66,14 +56,6 @@
         "airbrake out",
         "speed brake out",
         "airbrake on"
-      ]
-    },
-    "cockpit_airbrake_in": {
-      "control": "Airbrake Off",
-      "phrases": [
-        "airbrake in",
-        "speed brake in",
-        "airbrake off"
       ]
     },
     "cockpit_canopy": {
@@ -86,6 +68,39 @@
         "canopy",
         "open the canopy",
         "close the canopy"
+      ]
+    },
+    "cockpit_flaps_down": {
+      "control": "Flaps Landing Position",
+      "phrases": [
+        "flaps down",
+        "flaps landing position"
+      ]
+    },
+    "cockpit_flaps_up": {
+      "control": "Flaps Up",
+      "phrases": [
+        "flaps up"
+      ]
+    },
+    "cockpit_gear_down": {
+      "control": "Landing Gear Down",
+      "phrases": [
+        "gear down",
+        "gear coming down",
+        "lower the gear"
+      ]
+    },
+    "cockpit_gear_up": {
+      "control": "Landing Gear Up",
+      "requires": [
+        "onGround==0"
+      ],
+      "refusal": "not while you're on the ground",
+      "phrases": [
+        "gear up",
+        "gear coming up",
+        "raise the gear"
       ]
     },
     "cockpit_nav_lights": {

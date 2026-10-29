@@ -39,9 +39,38 @@ end
 
 _ = function(text) return text end
 
--- Resolves against DCS's internal device tables, which are not available here. Marked
--- rather than guessed: a wrong key is worse than a missing one.
+-- DCS's own keyboard defaults, loaded from the game rather than guessed.
+--
+-- This used to return a placeholder for everything, on the belief that the table was
+-- internal and unavailable. It is neither: Scripts/Input/DefaultAssignments.lua loads
+-- standalone and returns a plain table keyed by device. Stubbing it marked 29 controls
+-- on the F-15C as having no key, including "Flaps Up" (LCtrl+F) and "Flaps Landing
+-- Position" (LShift+F) - which are bound, work in the game, and were reported to the
+-- player as unbound.
+--
+-- Only the Keyboard device is read. ATCAI presses keys; a joystick default is a button
+-- it cannot send, so those stay unresolved rather than being faked.
+local keyboardDefaults = {}
+do
+    local chunk = loadfile(DCS_ROOT .. "/Scripts/Input/DefaultAssignments.lua")
+    if chunk then
+        local ok, assignments = pcall(chunk)
+        if ok and type(assignments) == "table" and type(assignments.Keyboard) == "table" then
+            keyboardDefaults = assignments.Keyboard
+        end
+    end
+    -- A failure here is not fatal: every control simply stays unresolved, which is the
+    -- behaviour this file had before, so a DCS update that moves the file degrades to
+    -- "fewer controls available" rather than to a wrong key being pressed.
+end
+
 function defaultDeviceAssignmentFor(name)
+    local combo = keyboardDefaults[name]
+    -- Guard the shape as well as the presence: the same table holds joystick entries
+    -- like 'JOY_Y' (a string) and axis definitions, and neither is a key we can press.
+    if type(combo) == "table" and combo.key then
+        return { combo }
+    end
     return { { key = "@unresolved:" .. tostring(name) } }
 end
 

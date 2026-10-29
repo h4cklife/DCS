@@ -1,0 +1,141 @@
+{
+  "comments": [
+    "What you say to ATC, and which request each phrase means.",
+    "",
+    "THIS FILE IS THE SHIPPED DEFAULTS AND IS NEVER WRITTEN TO. Editing it works, but",
+    "the next update replaces it. To change what you say, use the Voice Commands tab in",
+    "the manager, which writes your changes to a separate file:",
+    "",
+    "    %LOCALAPPDATA%\\ATCAI\\phrases.json",
+    "",
+    "That file holds only what you changed, so a new release's new commands and corrected",
+    "phrasings still reach you. A whole copy of this file in your own folder could not do",
+    "that: your edit and an out-of-date default would be indistinguishable.",
+    "",
+    "The leading verb is expanded automatically - 'request taxi' also matches",
+    "'requesting taxi', so only one form is listed. Same for report/reporting and",
+    "declare/declaring.",
+    "",
+    "Longest phrase wins, so 'request taxi clearance' beats 'request taxi'. A distress",
+    "call wins over anything said in the same breath, whatever the lengths.",
+    "",
+    "Restart listening after any change, so the recogniser rebuilds its grammar."
+  ],
+  "version": 1,
+  "commands": {
+    "radio_check": {
+      "phrases": [
+        "radio check",
+        "request radio check",
+        "how do you read",
+        "how do you hear me"
+      ]
+    },
+    "atis": {
+      "phrases": [
+        "request airfield information",
+        "request field information",
+        "request atis",
+        "say airfield information"
+      ]
+    },
+    "startup": {
+      "phrases": [
+        "request startup",
+        "request engine start",
+        "ready for startup"
+      ]
+    },
+    "taxi": {
+      "phrases": [
+        "request taxi",
+        "request taxi clearance",
+        "ready to taxi"
+      ]
+    },
+    "takeoff": {
+      "phrases": [
+        "request takeoff",
+        "request departure",
+        "ready for takeoff",
+        "ready for departure"
+      ]
+    },
+    "inbound": {
+      "phrases": [
+        "report inbound",
+        "request inbound",
+        "inbound for landing"
+      ]
+    },
+    "landing": {
+      "phrases": [
+        "request landing",
+        "request landing clearance",
+        "on final"
+      ]
+    },
+    "parking": {
+      "phrases": [
+        "request parking",
+        "request taxi to parking"
+      ]
+    },
+    "loadout": {
+      "phrases": [
+        "request loadout",
+        "request weapons status",
+        "loadout status",
+        "say my loadout"
+      ]
+    },
+    "emergency": {
+      "notes": [
+        "Three repetitions, which is real procedure and the only form that survived",
+        "measurement: the short forms produced 22 false declarations in ten minutes at a",
+        "median confidence of 0.92. See docs/FALSE-TRIGGERS-PLAN.md before shortening",
+        "anything here."
+      ],
+      "phrases": [
+        "mayday mayday mayday",
+        "declare emergency",
+        "declare an emergency",
+        "declaring emergency",
+        "declaring an emergency",
+        "request emergency landing",
+        "emergency landing"
+      ]
+    },
+    "cancel_emergency": {
+      "notes": [
+        "Needed because a repeat declaration is deliberately silent: without a way to",
+        "cancel, one false mayday would suppress a real one for the rest of the sortie."
+      ],
+      "phrases": [
+        "cancel emergency",
+        "cancel my emergency",
+        "cancel the emergency",
+        "disregard my emergency"
+      ]
+    },
+    "vectors": {
+      "phrases": [
+        "request vectors",
+        "request vectors home",
+        "request vectors to nearest field",
+        "request divert",
+        "say nearest field",
+        "where is the nearest field",
+        "nearest airfield"
+      ]
+    },
+    "straight_in": {
+      "phrases": [
+        "request straight in",
+        "request straight in approach",
+        "requesting straight in",
+        "straight in approach"
+      ]
+    }
+  }
+}

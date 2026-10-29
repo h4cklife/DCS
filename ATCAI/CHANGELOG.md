@@ -1,5 +1,218 @@
 # Changelog
 
+## 1.8.0 - 2026-10-29
+
+### For players
+
+- **A startup splash screen.** The ATCAI banner shows for at least five seconds while the
+  Manager opens, centred and borderless at its exact size. Click it, press **Dismiss** or
+  hit Escape to skip the rest of the wait.
+
+  "At least five seconds" cuts both ways: a fast start is held to the full five, and a
+  slow one is never cut short — nor does it wait five seconds *on top* of a slow start.
+
+- **The Manager window now opens centred too**, by the same arithmetic as the splash, so
+  the banner is replaced where it stood instead of the window jumping to wherever Windows
+  would have cascaded it.
+
+  Being straight about what it is: **branding, not a progress indicator.** A single-file
+  exe spends several seconds unpacking before Python exists, and nothing drawn by the app
+  can appear during that. Covering that gap needs PyInstaller's bootloader splash, which
+  is a different mechanism and was deliberately left out rather than bolted alongside.
+
+- **The README banner now displays on GitHub.** It pointed at `../assets/ATCAI_Banner.png`
+  — outside the module, at a path that had never been committed — so it had only ever
+  rendered on the author's machine. It now points inside `ATCAI/`.
+
+### For developers
+
+- `assets/ATCAI_Splash.png` (724x242) is generated from the 2172x724 banner by
+  `tools/make_splash.py`, and is the only one of the two bundled into the exe.
+
+  It is a build step rather than a runtime resize for two reasons. Tk can only shrink by
+  dropping pixels, which at 3x discards eight of every nine and leaves text ragged; this
+  averages each 3x3 block instead, which is a real resample. And it keeps 2 MB of banner
+  out of a 10.7 MB exe in favour of 382 KB.
+
+  Standard library only — no Pillow, which would have added roughly 10 MB for one image.
+  A test asserts nothing under `manager/` imports it, and another asserts the splash still
+  matches the banner's aspect ratio, which is the one way the two files can drift.
+
+- The splash lives in `manager/splash.py` and is driven from `main()`, not `App`, so the
+  GUI tests do not have to dismiss a banner they never asked for. It is shown **after**
+  the single-instance check: were it first, a second copy would flash a banner and vanish,
+  which reads as a crash rather than as "already running".
+
+- Every failure path ends in "no splash, carry on" — missing file, undecodable image, a
+  Python with no tkinter, no display. A splash screen that can stop the Manager opening
+  would be worse than no splash screen.
+
+## 1.7.2 - 2026-10-29
+
+### Fixed
+
+- **ATCAI could not see most of DCS's default keyboard bindings.** `readbindings.lua`
+  stubbed out `defaultDeviceAssignmentFor` on the belief that it resolved against DCS's
+  internals. It does not — `Scripts/Input/DefaultAssignments.lua` loads standalone and
+  returns a plain table keyed by device. **29 controls on the F-15C were reported as
+  having no key when they were bound all along**, including `Flaps Up` (LCtrl+F) and
+  `Flaps Landing Position` (LShift+F). Resolving the table properly takes that count to
+  **zero**.
+
+  Only the Keyboard device is read. A control bound to a stick axis or button stays
+  unresolved rather than being turned into a plausible-looking key, and the log now says
+  that is what happened instead of "no literal key", which read as "unbound".
+
+  Making those controls *readable* does not make them *reachable*: `Eject (3 times)`,
+  `Weapon Release`, `Weapon Fire` and `Countermeasures Release` are in the same table and
+  are still refused by control name, with a test asserting it.
+
+### Changed
+
+- **Flaps are now "flaps up" and "flaps down" instead of a toggle.** The bare phrase
+  "flaps" is gone, and so are "toggle flaps" and "flaps now".
+
+  "flaps" was one word with no state condition, and it was the **only false trigger ever
+  measured that reached an aircraft control** — game audio over desktop speakers pressed
+  `F` in flight. The toggle went too, for a separate reason: its result depends on where
+  the flaps are now, which DCS does not publish, so "flaps up" driving a toggle *lowers*
+  flaps that are already up. That is the opposite of the request, at the one moment
+  someone would make it. Two commands that name a direction cannot do that.
+
+  An airframe that only binds the toggle will refuse both directional commands with a
+  reason; `cockpit/controls.json` says how to add it back if you need it.
+
+## 1.7.1 - 2026-10-28
+
+Fixes for 1.7.0, found in the first flight test.
+
+### Fixed
+
+- **ATC voice commands did not work at all in the 1.7.0 exe.** The new phrase list
+  resolved to the wrong folder inside the packaged build — `<extraction>/phrases/`
+  instead of `<extraction>/voice-bridge/phrases/` — so it loaded as empty and **every
+  ATC request was missing from the recogniser's vocabulary**: no mayday, no taxi, no
+  landing, nothing. Running from source was unaffected, which is why the whole test
+  suite passed.
+
+  The symptom to recognise, if it ever happens again: the Log tab reports the size of the
+  vocabulary when listening starts. It should say **128 phrasings**. 1.7.0 said 38.
+
+  A test now builds a fake extraction folder from the packaging list itself and makes
+  every module find its own bundled files there, so this class of bug cannot pass again
+  for any file, not just this one.
+
+- **Comms-menu commands now have their own confidence floor** (0.70 by default, adjustable
+  on the Comms Keys tab), applied only when the keys are pressed for real. They had been
+  sharing ATC's lower threshold of 0.60 despite pressing keys into DCS exactly as cockpit
+  commands do — and a false "flight return to base" costs more than a missed radio call.
+  Measured: background noise ordered a test flight home nine times, two of those at 0.65
+  and 0.67.
+
+  Worth being plain about the limits — the other seven were 0.84 to 0.93, so a floor
+  catches the tail and nothing more. In a room with other people or music in it,
+  **push-to-talk** is the only complete answer.
+
+- **The Manager now says when your cockpit control list is missing shipped controls.**
+  Seeding only ever adds a file; it never merges into one that already exists. So a copy
+  made when the list held two controls kept two for ever, and four shipped controls —
+  flaps, airbrake, canopy, lights — were silently absent, with no symptom but a command
+  that did nothing. The AI Cockpit tab names what is missing and what to press.
+
+### Changed
+
+- **A claim withdrawn from the 1.7.0 docs**: that switching a source off makes the
+  remaining commands more reliable because there is less to confuse. It was written as
+  though established, on no evidence. The accidental 38-phrase vocabulary above was the
+  first test of it and pointed the other way — Windows returns the best match among the
+  phrases available, so removing competitors can concentrate noise on the survivors
+  instead of spreading it thin. One run with music and a door opening in it is not proof
+  either; vocabulary size is now documented as unmeasured. Switch a command off because
+  *it* misfires, not to improve the others.
+
+## 1.7.0 - 2026-10-28
+
+### Changed — read this one
+
+- **Distress calls are now "mayday mayday mayday". A single "mayday" and "pan pan" no
+  longer work.** Real procedure says three times, and measurement says the same thing
+  for a blunter reason: with a jet running, a keyboard in use and ATCAI's own replies
+  audible, the short forms produced **22 false emergency declarations in ten minutes**,
+  at a median confidence of 0.92 — so raising the confidence bar could never have caught
+  them. 20 of the 22 were "pan pan", which ATCAI did not treat differently from a mayday
+  anyway. The three-repetition form measured 12 for 12 at 0.91–0.95.
+
+  The cost is real and accepted: *"mayday mayday, Chevy 81, engine fire"* no longer
+  registers. Say it three times. Full measurements in
+  [docs/FALSE-TRIGGERS-PLAN.md](docs/FALSE-TRIGGERS-PLAN.md).
+
+### For players
+
+- **New: the Voice Commands tab.** Every command ATCAI knows, grouped by source, with a
+  tick box and an editor. Untick one and it is **removed from the recogniser's
+  vocabulary entirely** — not heard and then ignored, which is the difference between
+  noise having nothing to match and noise still being able to match. Press **Edit...**
+  to change what you say: "wheels up" instead of "gear up", or whatever you reach for.
+
+  This exists because your room is the one thing that cannot be measured from here. A
+  dog, a television, a passenger or a fan will trip some phrase, and which one is nobody's
+  guess. Switching off a command you never use costs nothing.
+
+  It does **not** reliably improve the commands you keep — an earlier draft of this entry
+  said it did, and the first run that could test the idea suggested the opposite. See
+  1.7.1.
+
+  The editor refuses a phrase the grammar cannot carry, or one that already means
+  something else — naming what — and warns about a phrase under about eight characters,
+  because that is the shape that caused the emergency problem above.
+
+- **Say "cancel emergency"** to lift one, or use **Cancel emergency** in the comms menu.
+  There was previously no way to un-declare at all.
+
+- **Your phrase changes survive updates properly.** They are stored as *differences* in
+  `%LOCALAPPDATA%\ATCAI\phrases.json`, not as a copy of the whole list — so a new
+  release's new commands and corrected phrasings still reach you even for commands you
+  have customised. A whole copy could not do that: your edit and an out-of-date default
+  would be indistinguishable.
+
+### Fixed
+
+- **A false mayday no longer snowballs.** Nothing checked whether an emergency was
+  already running, so each repeat triggered another transmission — 22 triggers produced
+  8 of them, and a tower that kept re-clearing a pilot who was already cleared. A repeat
+  declaration is now silent. ("cancel emergency" exists partly because of this: without
+  it, one stray call would have suppressed a real one for the rest of the sortie.)
+
+- **Which emergency phrase won depended on dictionary order.** The matcher returned on
+  the first priority phrase it happened to scan instead of the longest, so a shorter
+  distress phrase could beat a longer one. Harmless while every emergency phrase meant
+  the same thing; not harmless now the list has both a triple mayday and
+  "emergency landing" in it.
+
+- **`tools/phrase_separability.py` gave advice opposite to its own data.** It counted
+  "the matcher routed this elsewhere" as a misrecognition and told you to re-phrase,
+  when the words had been heard perfectly. It also read one recognition at a time, so it
+  could not see that two events were one utterance the recogniser split because the
+  phrases were said too fast — which is what produced every flagged line in the run that
+  exposed this. It now separates the two outcomes, gives different advice for each, and
+  warns when recognitions arrive too close together to trust.
+
+### For developers
+
+- The ATC phrase list moved out of `atcai_listen.py` into
+  `voice-bridge/phrases/atc_defaults.json`, so it can be read and diffed without reading
+  Python and sits alongside the comms and cockpit maps. It is **shipped defaults,
+  read-only, and deliberately never copied into the player's folder** — see
+  `atcai_phrases.py` for why that matters.
+- New `atcai_phrases.py` owns the defaults, the player's overlay, the merge and the
+  phrase validation, and is used by **both** the listener and the manager: two readers of
+  one format is how formats drift, and the tab must not be able to disagree with the
+  recogniser about what will be heard.
+- The overlay can re-word a command that exists but **cannot create one**, which is what
+  keeps phrase editing away from the controls `DENY_PATTERNS` refuses.
+- `run()` now refuses to start on an empty vocabulary rather than handing
+  `recognize.ps1` an empty grammar.
+
 ## 1.6.1 - 2026-10-26
 
 ### For players

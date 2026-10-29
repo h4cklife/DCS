@@ -34,6 +34,9 @@ Single-player only for now.
 1. **Close DCS** if it's running.
 2. Run **ATCAI-Manager.exe**. Nothing to install — it's one file.
 
+   The ATCAI banner shows for about five seconds while it opens. Click it, or press
+   **Dismiss**, to go straight to the Manager.
+
    Windows may warn you about it, or your antivirus may quarantine it. That's expected
    and explained in [Is it safe?](#is-it-safe) below — it happens to nearly every app
    packaged this way.
@@ -84,14 +87,38 @@ Speak like you would on a real radio:
 > *"Request loadout"*
 > *"Request straight in"*
 > *"Request vectors home"*
-> *"Mayday mayday, Chevy 81, engine fire"*
+> *"Mayday mayday mayday, Chevy 81, engine fire"*
 
 Your callsign, the tower's name and a runway can all be in there — ATCAI picks the
 request out of whatever you say. "Request" and "requesting" both work everywhere, and so
 do "declare" and "declaring".
 
+**Say "mayday" three times, not once.** That is real procedure, and it is also the only
+version ATCAI listens for. A single "mayday" is short enough that a jet, a keyboard or a
+TV in the next room produces it by accident — during testing that happened 22 times in
+ten minutes. "pan pan" is gone for the same reason. Say *"cancel emergency"* to lift one.
+
 The **Log** tab shows everything it heard, so if something isn't being picked up you
 can see why.
+
+### If ATCAI keeps hearing things you didn't say
+
+Open the **Voice Commands** tab and untick whatever is misfiring. An unticked command is
+removed from the recogniser's vocabulary altogether, so there is nothing left for the
+noise to match.
+
+This is worth doing without hesitation. Which phrase your room trips is not something
+anyone can predict for you — a dog, a television, a passenger, a fan, your own engine
+noise. Switching off a command you never use costs you nothing.
+
+What it does **not** reliably do is make the other commands better behaved. Switch off
+what misfires, not more. If your room is noisy enough that things keep firing anyway,
+turn on **push-to-talk** on the Talking to ATC tab — then nothing is heard at all unless
+you are holding the key, which is the only complete answer to a noisy room.
+
+The same tab lets you **change what you say**: "wheels up" instead of "gear up", or
+whatever you actually reach for. Press **Edit...** beside a command, remove a phrase or
+add your own, and press **Restart listening**.
 
 ### Hearing ATC on the radio instead of your speakers
 
@@ -102,6 +129,21 @@ the real ones, the same numbers DCS's own ATC menu lists for that field.
 
 SRS needs its server *and* client running. If it isn't working, switch back to the
 speakers option — that always works.
+
+**Which frequency should I actually tune to?** The airfield's. Nothing else is needed
+while you're near one: routine clearances go out on the field's frequency, and the calls
+that ignore tuning — refusals, your loadout, emergencies, vectors — go out on the field's
+frequency *as well as* the standard ATCAI channels. So one radio on the field's frequency
+hears everything.
+
+The standard channels (276.375 and the rest, on the Settings tab) only earn their keep
+when you're beyond range of any field ATCAI recognises. Putting one on a second radio is
+belt and braces, not a requirement.
+
+**Your radio frequency at mission start is set by the aircraft, not by ATCAI or SRS.**
+If you always want to spawn tuned to a particular frequency, that is a DCS or SRS-module
+setting rather than anything here — SRS, for example, hardcodes the starting frequencies
+for each aircraft in its own scripts.
 
 ## What ATC can do
 
@@ -122,9 +164,12 @@ speakers option — that always works.
 
 ### When it goes wrong
 
-Say **"mayday"** — that's all it takes. You don't have to be near a field, and you don't
-have to finish the sentence tidily; a mayday is heard even if you ask for something else
-in the same breath.
+Say **"mayday mayday mayday"** — three times, as you would on a real radio. You don't
+have to be near a field, and you don't have to finish the sentence tidily; a mayday is
+heard even if you ask for something else in the same breath.
+
+Declared one by accident, or sorted the problem out? Say **"cancel emergency"**, or use
+**Cancel emergency** in the comms menu.
 
 Once you've declared, ATC treats you differently until you park:
 
@@ -266,6 +311,17 @@ tells you so when you tick them.
 | "canopy" | Opens or closes it — on the ground only |
 | "nav lights" | Navigation lights |
 
+### Flaps are two commands, not a toggle
+
+Say **"flaps up"** or **"flaps down"**. DCS binds all three flap commands on the keyboard
+— the toggle on `F`, retract on `LCtrl+F`, landing position on `LShift+F` — and ATCAI
+deliberately uses the two directional ones.
+
+The toggle was dropped because its result depends on where the flaps are now, which DCS
+does not report to ATCAI. Say "flaps up" to something that toggles and, if they were
+already up, they come **down** — the opposite of what you asked, at exactly the moment
+you'd ask it.
+
 ### ATCAI does not decide the keys — DCS does
 
 This is the important bit. ATCAI reads the key combinations **out of your own DCS binding
@@ -302,6 +358,12 @@ refused in code.** Not merely left off the list — they cannot be enabled by ed
 A voice command that can eject you is a bad trade for convenience.
 
 ### Changing what you say
+
+Easiest from the **Voice Commands** tab — press **Edit...** beside the command. It checks
+what you type, so you find out there and then if a phrase already means something else,
+rather than from a log entry after a flight.
+
+Or edit the file directly:
 
 ```
 %LOCALAPPDATA%\ATCAI\cockpit\controls.json
@@ -345,8 +407,10 @@ things get copied out so you can edit them:
 │   ├── A-10A.json
 │   ├── Su-25T.json
 │   └── TF-51D.json
-└── cockpit\
-    └── controls.json     gear, flaps, airbrake, canopy, lights
+├── cockpit\
+│   └── controls.json     gear, flaps, airbrake, canopy, lights
+└── phrases.json          commands you switched off or re-worded on the
+                          Voice Commands tab — appears once you change something
 ```
 
 **Paste `%LOCALAPPDATA%\ATCAI` into Explorer's address bar** to get there — Windows
@@ -359,7 +423,11 @@ open that tab once.
 **Your edits are safe across updates.** A new version only ever adds files it has that
 you don't — it never overwrites one you've changed. If you ever want the originals back,
 **Use shipped maps** and **Use shipped controls** on those tabs will do it, and they ask
-first.
+first, as does **Restore all defaults** on Voice Commands.
+
+`phrases.json` works a little differently, and better: it holds **only what you changed**,
+not a whole copy of the list. So a new version's new commands and corrected phrasings
+reach you even for commands you have customised — there is nothing stale to shadow them.
 
 **After editing any of them, stop and start listening** on the Talking to ATC tab. The
 voice recogniser reads these files once, when it starts.

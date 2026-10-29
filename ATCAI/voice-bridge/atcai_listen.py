@@ -26,87 +26,20 @@ import tempfile
 import threading
 import time
 
+import atcai_phrases
+
 # Base phrasings per intent, mapped to the intents lua/atc/atc_inbox.lua understands.
+#
+# The list itself lives in voice-bridge/phrases/atc_defaults.json now, so it can be read
+# and diffed without reading Python, and so it sits alongside the comms and cockpit maps
+# instead of being the one phrase list that was different. Loaded here rather than
+# inlined so existing callers still find INTENT_PHRASES where they always have.
+#
 # Only one form of each leading verb is listed: VERB_VARIANTS generates the rest, so
 # "request taxi" and "requesting taxi" can never drift apart by hand.
-INTENT_PHRASES = {
-    "radio_check": [
-        "radio check",
-        "request radio check",
-        "how do you read",
-        "how do you hear me",
-    ],
-    "atis": [
-        "request airfield information",
-        "request field information",
-        "request atis",
-        "say airfield information",
-    ],
-    "startup": [
-        "request startup",
-        "request engine start",
-        "ready for startup",
-    ],
-    "taxi": [
-        "request taxi",
-        "request taxi clearance",
-        "ready to taxi",
-    ],
-    "takeoff": [
-        "request takeoff",
-        "request departure",
-        "ready for takeoff",
-        "ready for departure",
-    ],
-    "inbound": [
-        "report inbound",
-        "request inbound",
-        "inbound for landing",
-    ],
-    "landing": [
-        "request landing",
-        "request landing clearance",
-        "on final",
-    ],
-    "parking": [
-        "request parking",
-        "request taxi to parking",
-    ],
-    "loadout": [
-        "request loadout",
-        "request weapons status",
-        "loadout status",
-        "say my loadout",
-    ],
-    # Distress calls are deliberately short and distinctive: under stress nobody
-    # produces a full sentence, and "mayday" is unmistakable to the recogniser.
-    "emergency": [
-        "mayday",
-        "mayday mayday",
-        "pan pan",
-        "declare emergency",
-        "declare an emergency",
-        "declaring emergency",
-        "declaring an emergency",
-        "request emergency landing",
-        "emergency landing",
-    ],
-    "vectors": [
-        "request vectors",
-        "request vectors home",
-        "request vectors to nearest field",
-        "request divert",
-        "say nearest field",
-        "where is the nearest field",
-        "nearest airfield",
-    ],
-    "straight_in": [
-        "request straight in",
-        "request straight in approach",
-        "requesting straight in",
-        "straight in approach",
-    ],
-}
+#
+# What the *player* has changed is a separate file. See atcai_phrases for why.
+INTENT_PHRASES = atcai_phrases.load_defaults()
 
 # Intents handled outside the mission, by pressing keys in DCS's comms menu, rather
 # than by writing to the inbox the mission polls. The authority is the key maps
@@ -134,6 +67,45 @@ def cockpit_intents():
 
 def is_cockpit_intent(intent):
     return bool(intent) and intent in cockpit_intents()
+
+def _by_intent(mapping):
+    """{phrase: intent} -> {intent: [phrase, ...]}, which is how a person reads it."""
+    out = {}
+    for phrase, intent in sorted(mapping.items()):
+        out.setdefault(intent, []).append(phrase)
+    return out
+
+
+def command_sources():
+    """Every command there is, grouped by where it comes from, as
+    [(group name, {intent: [shipped phrase, ...]}), ...].
+
+    The recogniser does not care which source a phrase came from - phrase_to_intent
+    flattens all three. This exists for the Voice Commands tab, where the grouping is
+    how a person finds the command they want, and where "this whole source is switched
+    off on another tab" needs saying.
+
+    Shipped phrases, not effective ones: the tab applies the player's overlay itself so
+    it can show what has been changed.
+    """
+    groups = [("ATC requests", dict(INTENT_PHRASES))]
+
+    try:
+        import atcai_keys
+        comms, _ = atcai_keys.all_phrases()
+        groups.append(("Comms menu", _by_intent(comms)))
+    except Exception:                                    # no maps, or unreadable
+        groups.append(("Comms menu", {}))
+
+    try:
+        import atcai_cockpit
+        controls, _ = atcai_cockpit.all_phrases()
+        groups.append(("Cockpit controls", _by_intent(controls)))
+    except Exception:                                    # no map, or unreadable
+        groups.append(("Cockpit controls", {}))
+
+    return groups
+
 
 # Leading verbs people swap between without thinking. Each pair is expanded both ways.
 VERB_VARIANTS = (("request", "requesting"), ("report", "reporting"),
@@ -167,16 +139,37 @@ def no_window():
     return {"creationflags": getattr(subprocess, "CREATE_NO_WINDOW", 0x08000000)}
 
 
-def phrase_to_intent(on_log=None):
+def phrase_to_intent(on_log=None, overlay=None):
     """Every phrase the recogniser should listen for, mapped to its intent.
 
-    ATC requests come from INTENT_PHRASES above. Comms-menu commands come from the
-    per-aircraft key maps, so a player can change what they say by editing a JSON file
-    rather than the source.
+    ATC requests come from INTENT_PHRASES. Comms-menu commands come from the per-aircraft
+    key maps and cockpit controls from controls.json, so a player can change what they say
+    by editing a JSON file rather than the source.
+
+    `overlay` is the player's own changes (atcai_phrases.load_overlay). It is applied here
+    and nowhere else, because this is the one place all three sources meet - and because
+    the result becomes the recogniser's grammar, so a disabled phrase is not recognised
+    and then ignored, it simply does not exist. That is the only form of disable that
+    works: a phrase still in the grammar can soak up a dog barking through the leading
+    wildcard whatever we do with the result afterwards.
+
+    Filtering happens on the base phrases, before expand_phrases, so switching off
+    "request taxi" also switches off "requesting taxi". They are one command said two
+    ways, and the tab shows the base form.
     """
-    lookup = {p.lower(): intent
-              for intent, phrases in INTENT_PHRASES.items()
-              for p in expand_phrases(phrases)}
+    if overlay is None:
+        overlay, problems = atcai_phrases.load_overlay()
+        if problems and on_log:
+            for problem in problems:
+                on_log("! %s" % problem)
+
+    atc = [(phrase, intent)
+           for intent, phrases in INTENT_PHRASES.items()
+           for phrase in phrases]
+    lookup = {}
+    for phrase, intent in atcai_phrases.apply_overlay(atc, overlay):
+        for variant in expand_phrases([phrase]):
+            lookup.setdefault(variant, intent)
 
     try:
         import atcai_keys
@@ -187,7 +180,7 @@ def phrase_to_intent(on_log=None):
     # Map phrases get the same verb expansion ATC phrases do, so "request picture" and
     # "requesting picture" both work without every map having to list both.
     expanded = {}
-    for phrase, intent in comms.items():
+    for phrase, intent in atcai_phrases.apply_overlay(sorted(comms.items()), overlay):
         for variant in expand_phrases([phrase]):
             expanded.setdefault(variant, intent)
 
@@ -213,7 +206,8 @@ def phrase_to_intent(on_log=None):
     except Exception:
         return lookup
 
-    for phrase, intent in cockpit_phrases.items():
+    for phrase, intent in atcai_phrases.apply_overlay(sorted(cockpit_phrases.items()),
+                                                      overlay):
         for variant in expand_phrases([phrase]):
             if variant in lookup and lookup[variant] != intent:
                 if on_log:
@@ -240,23 +234,36 @@ def match_intent(text, lookup):
 
     With wildcard matching the recognised text can carry a callsign, the tower's name,
     a runway and so on around the request itself, so an exact lookup isn't enough.
-    Longest phrase wins, so "request taxi clearance" beats "request taxi" - except for
-    the priority intents above, which win outright.
+    Longest phrase wins, so "request taxi clearance" beats "request taxi". A priority
+    intent beats a non-priority one whatever their lengths - and among priority matches
+    the longest still wins.
+
+    That last clause used to be missing: the loop returned on the first priority phrase
+    it happened to scan, which made the result depend on dict order and let a shorter
+    distress phrase beat a longer one. Harmless while "mayday" was in the list and every
+    emergency phrase meant the same thing; not harmless once the list has both
+    "mayday mayday mayday" and "emergency landing" in it.
     """
     spoken = " ".join(text.lower().split())
+    # An utterance that is exactly one phrase has no room for a second command, so the
+    # priority rule cannot change the answer here. The one way it could - a non-priority
+    # phrase whose own words contain a distress call - is what the phrase editor's
+    # containment check exists to stop anyone creating.
     exact = lookup.get(spoken)
     if exact:
         return exact
 
     best, best_len = None, 0
+    priority, priority_len = None, 0
     for phrase, intent in lookup.items():
         if not re.search(r"\b%s\b" % re.escape(phrase), spoken):
             continue
         if intent in PRIORITY_INTENTS:
-            return intent
-        if len(phrase) > best_len:
+            if len(phrase) > priority_len:
+                priority, priority_len = intent, len(phrase)
+        elif len(phrase) > best_len:
             best, best_len = intent, len(phrase)
-    return best
+    return priority or best
 
 
 class StateWatcher(object):
@@ -368,15 +375,30 @@ def _handle_cockpit(intent, text, confidence, watcher, args, say):
         say('~ "%s" -> %s not sent: %s' % (text, intent, sender.last_error))
 
 
+# Comms-menu commands press keys into DCS exactly as cockpit commands do, so they get
+# the same floor rather than ATC's. They had been sharing ATC's lower one, which is an
+# asymmetry with nothing behind it: a missed radio call costs a repeat, a false
+# "flight return to base" sends your flight home.
+COMMS_CONFIDENCE = 0.70
+
+
 def _handle_comms(intent, text, confidence, watcher, args, say):
-    """A comms-menu command. Phase A resolves and reports; it never presses anything."""
+    """A comms-menu command: resolve it, then press the keys if sending is on."""
     try:
         import atcai_keys
     except ImportError as exc:
         say("! comms keys unavailable: %s" % exc)
         return
 
+    # Only when the keys will actually be pressed. In dry run the whole point is to see
+    # what a command would do, so a marginal recognition is worth reporting.
     sending = bool(getattr(args, "send_keys", False))
+    floor = getattr(args, "comms_confidence", COMMS_CONFIDENCE)
+    if sending and confidence < floor:
+        say('~ heard "%s" (%.2f) - below the comms threshold of %.2f, ignoring'
+            % (text, confidence, floor))
+        return
+
     resolution = atcai_keys.resolve(
         intent, watcher.state, enabled=getattr(args, "comms_keys", False),
         sending=sending)
@@ -511,6 +533,7 @@ def build_options(**overrides):
         inbox=None, min_confidence=0.6, strict=False,
         ptt_enabled=False, ptt_key_code=0x11, ptt_key_name="Left Ctrl",
         comms_keys=False, send_keys=False, dcs_log=None,
+        comms_confidence=COMMS_CONFIDENCE,
         cockpit_keys=False, cockpit_send=False, cockpit_confidence=0.70,
         bindings_cache=None,
     )
@@ -525,7 +548,17 @@ def run(args, on_log=None, should_stop=None):
     show what was heard.
     """
     say = on_log or (lambda message: print(message, flush=True))
+    # Always read the player's changes from disk here rather than taking them from the
+    # caller: the manager writes the file and restarts listening, so the file is the one
+    # source of truth and the tab cannot show something the recogniser disagrees with.
     lookup = phrase_to_intent(on_log=say)
+    if not lookup:
+        # Reachable by disabling everything in the Voice Commands tab, or by a
+        # hand-edited phrases.json. recognize.ps1 has never been handed an empty
+        # grammar, and a clear refusal beats finding out what it does.
+        say("! every voice command is disabled - nothing to listen for.")
+        say("  Re-enable something on the Voice Commands tab.")
+        return 1
 
     inbox = args.inbox or default_inbox_path(args.windows_user or "")
     try:
@@ -649,6 +682,8 @@ def main():
     parser.add_argument("--inbox", help="path to the Lua inbox file the mission polls")
     parser.add_argument("--min-confidence", type=float, default=0.6,
                         help="ignore recognitions below this confidence (0-1)")
+    parser.add_argument("--comms-confidence", type=float, default=COMMS_CONFIDENCE,
+                        help="separate floor for comms-menu commands, which press keys")
     parser.add_argument("--list-phrases", action="store_true",
                         help="print the phrases ATC understands and exit")
     parser.add_argument("--ptt-key-code", type=lambda v: int(v, 0), default=0x11,

@@ -42,10 +42,14 @@ local function buildMenuForUnit(unit)
         missionCommands.addCommandForGroup(groupId, "Request landing", root, ATC.requestLanding, params)
         missionCommands.addCommandForGroup(groupId, "Request taxi to parking", root, ATC.requestParking, params)
         missionCommands.addCommandForGroup(groupId, "Request loadout status", root, ATC.requestLoadout, params)
-        -- Last because the menu is the slow way to declare one; saying "mayday" is the
-        -- fast way, and that's the point of having voice at all.
+        -- Last because the menu is the slow way to declare one; saying
+        -- "mayday mayday mayday" is the fast way, and that's the point of having voice
+        -- at all. Cancelling is here too, and matters more than it looks: if the
+        -- recogniser declares an emergency the pilot did not, this is how they get out
+        -- of it without having to say anything.
         missionCommands.addCommandForGroup(groupId, "Request vectors to nearest field", root, ATC.requestVectors, params)
         missionCommands.addCommandForGroup(groupId, "Declare emergency", root, ATC.declareEmergency, params)
+        missionCommands.addCommandForGroup(groupId, "Cancel emergency", root, ATC.cancelEmergency, params)
 
         env.info("ATCAI: menu built for group " .. tostring(groupId) ..
             " (" .. tostring(unit:getName()) .. ")")

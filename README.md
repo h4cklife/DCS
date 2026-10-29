@@ -1,3 +1,5 @@
+![DCS Modules & Tools](assets/DCS_Banner.png)
+
 # DCS modules
 
 Modules and tools for [DCS World](https://www.digitalcombatsimulator.com/), developed by

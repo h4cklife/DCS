@@ -219,8 +219,14 @@ class TestGrammarIsShared:
         import json
         path = mictest.write_spec(str(tmp_path / "spec.json"))
         phrases = json.loads(open(path, encoding="utf-8").read())["requests"]
-        assert "mayday" in phrases
+        assert "mayday mayday mayday" in phrases
+        assert "cancel emergency" in phrases
         assert any(p.startswith("request vectors") for p in phrases)
+        # The mic test shares the real grammar, so the dropped forms must be gone here
+        # too: a phrase the recogniser can still hear on this tab but not in the air
+        # would make the diagnostic lie.
+        assert "mayday" not in phrases
+        assert "pan pan" not in phrases
 
 
 class TestStreamHandling:

@@ -34,6 +34,9 @@ DEFAULTS = {
     "atis_frequency": "380.000",
     "comms_keys_enabled": False,
     "send_keys_enabled": False,
+    # Comms commands press keys into DCS, so they get the cockpit's floor rather than
+    # ATC's: a missed radio call costs a repeat, a false "flight return to base" does not.
+    "comms_confidence": 0.70,
     "cockpit_keys_enabled": False,
     "cockpit_send_enabled": False,
     "cockpit_confidence": 0.70,
@@ -55,6 +58,7 @@ VALIDATORS = {
     "atis_auto_frequency": lambda v: isinstance(v, bool),
     "comms_keys_enabled": lambda v: isinstance(v, bool),
     "send_keys_enabled": lambda v: isinstance(v, bool),
+    "comms_confidence": lambda v: isinstance(v, (int, float)) and 0.0 < float(v) <= 1.0,
     "cockpit_keys_enabled": lambda v: isinstance(v, bool),
     "cockpit_send_enabled": lambda v: isinstance(v, bool),
     "cockpit_confidence": lambda v: isinstance(v, (int, float)) and 0.0 < float(v) <= 1.0,

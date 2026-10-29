@@ -25,7 +25,7 @@ def tk_root():
 
 
 @pytest.fixture
-def gui(tk_root, prefs_file):
+def gui(tk_root, prefs_file, phrase_overlay_file):
     import app
     window = app.App(tk_root)
     yield window
@@ -139,7 +139,7 @@ class TestTabLayout:
     def test_each_job_has_its_own_tab(self, gui):
         assert self._tab_names(gui) == [
             "Setup", "Talking to ATC", "Test Microphone", "Hearing ATC",
-            "Comms Keys", "AI Cockpit", "Settings", "Log",
+            "Comms Keys", "AI Cockpit", "Voice Commands", "Settings", "Log",
         ]
 
     def test_the_log_lives_in_a_tab_not_under_every_tab(self, gui):
@@ -329,6 +329,21 @@ class TestCockpitTab:
         assert captured["cockpit_keys"] is True
         assert captured["cockpit_send"] is False
         assert captured["cockpit_confidence"] == 0.8
+
+    def test_the_listener_is_told_the_comms_confidence(self, gui, monkeypatch):
+        """Comms commands press keys, so the floor has to reach the listener - it used
+        to share ATC's lower one, and background noise sent a flight home nine times."""
+        import app
+        captured = {}
+        monkeypatch.setattr(app.atcai_listen, "run",
+                            lambda options, on_log=None, should_stop=None:
+                            captured.update(vars(options)))
+        gui.comms_confidence.set(0.85)
+        gui._run_listener(None, lambda m: None, lambda: True)
+        assert captured["comms_confidence"] == 0.85
+
+    def test_the_comms_floor_defaults_above_atcs(self, gui):
+        assert gui.comms_confidence.get() > gui.confidence.get()
 
 
 class TestEveryVoiceSwitchSaysItNeedsARestart:
@@ -850,3 +865,142 @@ class TestAtisControls:
             assert window.atis_auto.get() is True
         finally:
             window.destroy()
+
+
+class TestVoiceCommandsTab:
+    """Enable, disable and re-word commands.
+
+    The point of the tab is that a disabled command leaves the recogniser's vocabulary
+    entirely, so most of these assert against the grammar rather than against widgets.
+    """
+
+    def test_the_tab_exists(self, gui):
+        assert hasattr(gui, "phrase_counts")
+        assert hasattr(gui, "phrase_body")
+
+    def test_it_counts_every_command_from_every_source(self, gui):
+        import atcai_listen
+        expected = sum(len(commands) for _, commands in atcai_listen.command_sources())
+        assert gui.phrase_counts.cget("text").startswith("%d commands" % expected)
+        assert "0 disabled" in gui.phrase_counts.cget("text")
+
+    def test_nothing_is_written_until_something_changes(self, gui, phrase_overlay_file):
+        assert not phrase_overlay_file.exists()
+
+    def test_turning_a_command_off_removes_it_from_the_vocabulary(
+            self, gui, phrase_overlay_file):
+        import atcai_listen
+        import atcai_phrases
+        gui.phrase_switches["emergency"].set(False)
+        gui._on_command_toggled("emergency")
+
+        assert phrase_overlay_file.exists(), "the change was not saved"
+        overlay, problems = atcai_phrases.load_overlay(str(phrase_overlay_file))
+        assert problems == []
+        assert overlay["emergency"]["enabled"] is False
+
+        lookup = atcai_listen.phrase_to_intent(overlay=overlay)
+        assert "mayday mayday mayday" not in lookup
+        assert "1 disabled" in gui.phrase_counts.cget("text")
+
+    def test_turning_it_back_on_leaves_no_trace(self, gui, phrase_overlay_file):
+        import atcai_phrases
+        gui.phrase_switches["emergency"].set(False)
+        gui._on_command_toggled("emergency")
+        gui.phrase_switches["emergency"].set(True)
+        gui._on_command_toggled("emergency")
+
+        overlay, _ = atcai_phrases.load_overlay(str(phrase_overlay_file))
+        assert overlay == {}, "an unchanged command should not appear in the file"
+
+    def test_adding_a_phrase_reaches_the_vocabulary(self, gui, phrase_overlay_file):
+        import atcai_listen
+        import atcai_phrases
+        result = gui._add_phrase("taxi", "ready to roll out")
+        assert result.ok, result.message
+
+        overlay, _ = atcai_phrases.load_overlay(str(phrase_overlay_file))
+        lookup = atcai_listen.phrase_to_intent(overlay=overlay)
+        assert lookup["ready to roll out"] == "taxi"
+
+    def test_a_refused_phrase_is_not_written(self, gui, phrase_overlay_file):
+        """It collides with another command, so one of them would be silently dropped."""
+        result = gui._add_phrase("taxi", "request landing")
+        assert not result.ok and result.level == "refuse"
+        assert not phrase_overlay_file.exists()
+
+    def test_punctuation_is_refused_without_writing(self, gui, phrase_overlay_file):
+        result = gui._add_phrase("taxi", "ready, to roll!")
+        assert not result.ok
+        assert not phrase_overlay_file.exists()
+
+    def test_a_short_phrase_is_allowed_but_warns(self, gui):
+        result = gui._add_phrase("taxi", "rolling")
+        assert result.ok and result.level == "warn"
+        assert "short" in result.message.lower()
+
+    def test_removing_a_shipped_phrase_keeps_its_siblings(self, gui):
+        import atcai_listen
+        import atcai_phrases
+        gui._remove_phrase("taxi", "ready to taxi",
+                           atcai_listen.INTENT_PHRASES["taxi"])
+        lookup = atcai_listen.phrase_to_intent(overlay=gui.phrase_overlay)
+        assert "ready to taxi" not in lookup
+        assert lookup.get("request taxi") == "taxi"
+
+    def test_re_adding_a_removed_phrase_clears_the_removal(self, gui):
+        """Rather than stacking an add on top of a remove, which would read as a change
+        to a command that is now exactly as shipped."""
+        import atcai_listen
+        gui._remove_phrase("taxi", "ready to taxi",
+                           atcai_listen.INTENT_PHRASES["taxi"])
+        gui._add_phrase("taxi", "ready to taxi")
+        assert "taxi" not in gui.phrase_overlay
+
+    def test_restoring_one_command_deletes_its_entry(self, gui):
+        gui._add_phrase("taxi", "ready to roll out")
+        assert "taxi" in gui.phrase_overlay
+        gui._restore_command("taxi")
+        assert "taxi" not in gui.phrase_overlay
+
+    def test_restore_all_asks_first_and_can_be_declined(self, gui, monkeypatch):
+        import app
+        gui._add_phrase("taxi", "ready to roll out")
+        monkeypatch.setattr(app.messagebox, "askyesno", lambda *a, **k: False)
+        gui._restore_all_phrases()
+        assert "taxi" in gui.phrase_overlay, "declining should change nothing"
+
+        monkeypatch.setattr(app.messagebox, "askyesno", lambda *a, **k: True)
+        gui._restore_all_phrases()
+        assert gui.phrase_overlay == {}
+
+    def test_the_tab_shows_what_the_recogniser_will_hear(self, gui):
+        """The tab and the grammar must not be able to disagree - the tab is what the
+        player checks after an edit, so a stale view is worse than no view."""
+        import atcai_listen
+        gui._add_phrase("taxi", "ready to roll out")
+        gui._remove_phrase("taxi", "request taxi",
+                           atcai_listen.INTENT_PHRASES["taxi"])
+
+        shown = gui._phrases_in_force()
+        lookup = atcai_listen.phrase_to_intent(overlay=gui.phrase_overlay)
+        for intent, phrases in shown.items():
+            for phrase in phrases:
+                assert lookup.get(phrase) == intent, (
+                    '"%s" is shown as %s but the grammar says %s'
+                    % (phrase, intent, lookup.get(phrase)))
+
+    def test_the_editor_dialog_opens_and_closes(self, gui):
+        dialog = gui._edit_command("taxi")
+        try:
+            assert "taxi" in dialog.title()
+        finally:
+            dialog.destroy()
+
+    def test_a_disabled_source_says_where_to_turn_it_on(self, gui):
+        gui.comms_keys_enabled.set(False)
+        notes = {name: note for name, note, _, _ in gui._phrase_groups()}
+        assert "Comms Keys tab" in (notes["Comms menu"] or "")
+        gui.comms_keys_enabled.set(True)
+        notes = {name: note for name, note, _, _ in gui._phrase_groups()}
+        assert notes["Comms menu"] is None

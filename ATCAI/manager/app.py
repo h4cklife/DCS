@@ -27,6 +27,7 @@ sys.path.insert(0, str(HERE.parent / "voice-bridge"))
 import installer  # noqa: E402
 import prefs  # noqa: E402
 import single_instance  # noqa: E402
+import splash  # noqa: E402
 import atcai_listen  # noqa: E402
 import atcai_tts  # noqa: E402
 import atcai_mictest  # noqa: E402
@@ -34,9 +35,10 @@ import atcai_micselect  # noqa: E402
 import atcai_bindings  # noqa: E402
 import atcai_cockpit  # noqa: E402
 import atcai_keys  # noqa: E402
+import atcai_phrases  # noqa: E402
 import atcai_sendkeys  # noqa: E402
 
-VERSION = "1.6.1"
+VERSION = "1.8.0"
 PAD = 8
 
 
@@ -86,6 +88,10 @@ class App(ttk.Frame):
         self.mic_events: queue.Queue = queue.Queue()
         self.prefs = prefs.load()
         self.ptt_key_name = str(self.prefs.get("ptt_key_name", "Ctrl"))
+        # Phrase changes live in their own file rather than in prefs: they are a
+        # difference against the shipped list, not a setting. See atcai_phrases.
+        self.phrase_overlay, self._phrase_problems = atcai_phrases.load_overlay()
+        self.phrase_switches = {}
         # Saving is suppressed until start-up finishes: _detect() runs before the
         # controls are seeded, and would otherwise write defaults over saved settings.
         self._ready = False
@@ -125,6 +131,7 @@ class App(ttk.Frame):
         self._build_hearing(tabs)
         self._build_comms(tabs)
         self._build_cockpit(tabs)
+        self._build_voice_commands(tabs)
         self._build_settings(tabs)
         self._build_log(tabs)
 
@@ -350,6 +357,26 @@ class App(ttk.Frame):
                         text="Actually press the keys (otherwise dry run)"
                         ).grid(row=6, column=0, columnspan=2, sticky="w", pady=(PAD, 0))
 
+        ttk.Label(box, text="How sure before pressing:").grid(row=6, column=0,
+                                                               sticky="w",
+                                                               pady=(PAD, 0))
+        self.comms_confidence = tk.DoubleVar(value=0.70)
+        confidence_row = ttk.Frame(box)
+        confidence_row.grid(row=6, column=1, sticky="w", padx=(PAD, 0), pady=(PAD, 0))
+        ttk.Scale(confidence_row, from_=0.3, to=0.95,
+                  variable=self.comms_confidence, orient="horizontal", length=200,
+                  command=lambda _: self._refresh_comms_confidence()).grid(row=0,
+                                                                           column=0)
+        self.comms_confidence_label = ttk.Label(confidence_row, foreground="#555")
+        self.comms_confidence_label.grid(row=0, column=1, padx=(PAD, 0))
+        ttk.Label(box, wraplength=700, justify="left", foreground="#555", text=(
+            "Separate from ATC's slider, and only applied when the keys are pressed for "
+            "real. These commands act on your flight, so a false one costs more than a "
+            "missed radio call — background noise ordered a test flight home nine times "
+            "at 0.65 to 0.93. Raising this helps a little; it is not a substitute for "
+            "push-to-talk in a noisy room."
+        )).grid(row=9, column=0, columnspan=2, sticky="w", pady=(4, 0))
+
         keys_test = ttk.Frame(box)
         keys_test.grid(row=7, column=0, columnspan=2, sticky="w")
         ttk.Button(keys_test, text="Test keys in Notepad",
@@ -388,6 +415,10 @@ class App(ttk.Frame):
         else:
             self._enqueue("voice", "%s %s - takes effect when you start listening"
                                    % (what, state))
+
+    def _refresh_comms_confidence(self):
+        self.comms_confidence_label.config(text="%.2f" % self.comms_confidence.get())
+        self._remember()
 
     def _on_send_keys_toggled(self):
         """Pressing keys for real is a different proposition from logging them, so it
@@ -605,9 +636,20 @@ class App(ttk.Frame):
                               % atcai_cockpit.user_dir())
             controls = atcai_cockpit.load_controls()
             folder = atcai_cockpit.controls_dir()
+            missing = atcai_cockpit.missing_user_controls()
         except Exception as exc:                          # never take the GUI down
             self._cockpit_write("could not read the control list: %r" % exc)
             return
+
+        if missing:
+            # Seeding never merges into an existing file, so a copy made when the list
+            # was shorter keeps the shorter list for ever - and the only symptom is a
+            # command that does nothing, which looks exactly like a recognition problem.
+            self._enqueue("app",
+                          "! your control list is missing %d shipped control(s): %s. "
+                          "Press \"Use shipped controls\" to get them - it replaces "
+                          "your copy, so note any phrases you have changed first."
+                          % (len(missing), ", ".join(missing)))
 
         bindings = {}
         aircraft = getattr(self, "_cockpit_last_aircraft", None)
@@ -649,6 +691,343 @@ class App(ttk.Frame):
         atcai_cockpit.refresh_user_controls()
         self._enqueue("app", "control list reset to the shipped version")
         self._refresh_cockpit_controls()
+
+    # ---------- voice commands ----------
+
+    def _build_voice_commands(self, tabs):
+        """Which commands exist, and what you say for each.
+
+        The player's room is the one thing this project cannot measure from here. A dog,
+        a TV or a jet engine will trip some phrase, and which one is nobody's guess - so
+        the switch belongs to them. The same list doubles as "say it the way I say it",
+        because both are the same edit underneath: a phrase added, a phrase removed.
+        """
+        tab = ttk.Frame(tabs, padding=PAD)
+        tabs.add(tab, text="Voice Commands")
+        tab.columnconfigure(0, weight=1)
+        tab.rowconfigure(1, weight=1)
+
+        head = ttk.Frame(tab)
+        head.grid(row=0, column=0, sticky="ew")
+        head.columnconfigure(0, weight=1)
+        ttk.Label(head, wraplength=700, justify="left", text=(
+            "Untick a command to stop ATCAI listening for it at all, or edit what you "
+            "say. A command you untick is removed from the recogniser's vocabulary, so "
+            "background noise cannot trigger it."
+        )).grid(row=0, column=0, columnspan=3, sticky="w")
+
+        self.phrase_counts = ttk.Label(head, text="", foreground="#555")
+        self.phrase_counts.grid(row=1, column=0, sticky="w", pady=(PAD, 0))
+        ttk.Button(head, text="Restore all defaults",
+                   command=self._restore_all_phrases).grid(row=1, column=1, sticky="e",
+                                                           pady=(PAD, 0))
+        ttk.Button(head, text="Restart listening",
+                   command=self._restart_listening).grid(row=1, column=2, sticky="e",
+                                                         padx=(PAD, 0), pady=(PAD, 0))
+
+        # A canvas rather than a plain frame: thirty-odd commands do not fit, and options
+        # below the fold are invisible, which is the mistake the old Voice tab made.
+        frame = ttk.Frame(tab)
+        frame.grid(row=1, column=0, sticky="nsew", pady=(PAD, 0))
+        frame.columnconfigure(0, weight=1)
+        frame.rowconfigure(0, weight=1)
+
+        self.phrase_canvas = tk.Canvas(frame, highlightthickness=0, height=320)
+        self.phrase_canvas.grid(row=0, column=0, sticky="nsew")
+        bar = ttk.Scrollbar(frame, orient="vertical",
+                            command=self.phrase_canvas.yview)
+        bar.grid(row=0, column=1, sticky="ns")
+        self.phrase_canvas.configure(yscrollcommand=bar.set)
+
+        self.phrase_body = ttk.Frame(self.phrase_canvas, padding=(0, 0, PAD, 0))
+        self.phrase_window = self.phrase_canvas.create_window(
+            (0, 0), window=self.phrase_body, anchor="nw")
+        self.phrase_body.bind(
+            "<Configure>",
+            lambda _: self.phrase_canvas.configure(
+                scrollregion=self.phrase_canvas.bbox("all")))
+        self.phrase_canvas.bind(
+            "<Configure>",
+            lambda event: self.phrase_canvas.itemconfigure(self.phrase_window,
+                                                           width=event.width))
+
+        ttk.Label(tab, foreground="#b45309", wraplength=700, justify="left", text=(
+            "Changes take effect when listening restarts — the recogniser builds its "
+            "vocabulary once, at start. Use Restart listening above, or Stop then Start "
+            "on Talking to ATC."
+        )).grid(row=2, column=0, sticky="w", pady=(PAD, 0))
+
+        self.phrase_path = ttk.Label(tab, foreground="#555", wraplength=700,
+                                     justify="left")
+        self.phrase_path.grid(row=3, column=0, sticky="w", pady=(4, 0))
+
+        self._refresh_voice_commands()
+
+    def _phrase_groups(self):
+        """[(group name, note, {intent: [effective phrase, ...]}), ...].
+
+        Effective, so the tab shows what the recogniser will actually hear. The note is
+        how the player learns that a whole source is switched off on a different tab -
+        otherwise "why isn't my cockpit command working" has two answers in two places.
+        """
+        notes = {
+            "Comms menu": (None if self.comms_keys_enabled.get()
+                           else "currently off — enable on the Comms Keys tab"),
+            "Cockpit controls": (None if self.cockpit_enabled.get()
+                                 else "currently off — enable on the AI Cockpit tab"),
+        }
+        groups = []
+        for name, shipped in atcai_listen.command_sources():
+            groups.append((name, notes.get(name),
+                           atcai_phrases.effective(shipped, self.phrase_overlay),
+                           shipped))
+        return groups
+
+    def _phrases_in_force(self):
+        """Every phrase currently in force, as {intent: [phrase, ...]}.
+
+        The whole set, not one group: a new ATC phrase can collide with a cockpit one,
+        and the editor has to catch that before the recogniser silently drops one of them.
+        """
+        in_force = {}
+        for _, _, effective, _ in self._phrase_groups():
+            in_force.update(effective)
+        return in_force
+
+    def _refresh_voice_commands(self):
+        for child in self.phrase_body.winfo_children():
+            child.destroy()
+
+        self.phrase_switches = {}
+        row = 0
+        commands = disabled = edited = 0
+
+        for name, note, effective, shipped in self._phrase_groups():
+            title = name if not note else "%s  (%s)" % (name, note)
+            ttk.Label(self.phrase_body, text=title, font=("", 9, "bold"),
+                      foreground="#555" if note else "").grid(
+                row=row, column=0, columnspan=3, sticky="w",
+                pady=(PAD if row else 0, 2))
+            row += 1
+
+            if not shipped:
+                ttk.Label(self.phrase_body, foreground="#555",
+                          text="   nothing available").grid(row=row, column=0,
+                                                            sticky="w")
+                row += 1
+                continue
+
+            for intent in sorted(shipped):
+                commands += 1
+                on = intent in effective
+                if not on:
+                    disabled += 1
+                changed = bool(self.phrase_overlay.get(intent, {}).get("add")
+                               or self.phrase_overlay.get(intent, {}).get("remove"))
+                if changed:
+                    edited += 1
+
+                switch = tk.BooleanVar(value=on)
+                self.phrase_switches[intent] = switch
+                ttk.Checkbutton(
+                    self.phrase_body, variable=switch, text=intent,
+                    command=lambda i=intent: self._on_command_toggled(i)
+                ).grid(row=row, column=0, sticky="w", padx=(PAD, 0))
+
+                said = " · ".join(effective.get(intent) or []) or "—"
+                ttk.Label(self.phrase_body, text=said + ("   (edited)" if changed else ""),
+                          foreground="#555" if on else "#999",
+                          wraplength=420, justify="left").grid(row=row, column=1,
+                                                               sticky="w", padx=(PAD, 0))
+                ttk.Button(self.phrase_body, text="Edit...", width=8,
+                           command=lambda i=intent: self._edit_command(i)).grid(
+                    row=row, column=2, sticky="e")
+                row += 1
+
+        self.phrase_body.columnconfigure(1, weight=1)
+        self.phrase_counts.config(text="%d commands · %d disabled · %d edited"
+                                       % (commands, disabled, edited))
+        path = atcai_phrases.overlay_path()
+        self.phrase_path.config(
+            text="Your changes: %s" % path if self.phrase_overlay
+            else "No changes yet. Anything you change is saved to %s" % path)
+
+    def _entry_for(self, intent):
+        return self.phrase_overlay.setdefault(intent, {})
+
+    def _tidy_overlay(self):
+        """Drop entries that no longer say anything, so the file stays a record of real
+        changes and "restore defaults" leaves no trace."""
+        for intent in list(self.phrase_overlay):
+            entry = self.phrase_overlay[intent]
+            if entry.get("enabled") is False:
+                continue
+            entry.pop("enabled", None)
+            if not entry.get("add") and not entry.get("remove"):
+                del self.phrase_overlay[intent]
+
+    def _save_phrase_overlay(self, what):
+        self._tidy_overlay()
+        path = atcai_phrases.save_overlay(self.phrase_overlay)
+        if path is None:
+            messagebox.showerror("Could not save that",
+                                 "ATCAI could not write %s. Your change is active for "
+                                 "now but will be lost when the manager closes."
+                                 % atcai_phrases.overlay_path())
+        self._refresh_voice_commands()
+        self._on_voice_switch_toggled(what, True)
+
+    def _on_command_toggled(self, intent):
+        on = self.phrase_switches[intent].get()
+        if on:
+            self._entry_for(intent).pop("enabled", None)
+        else:
+            self._entry_for(intent)["enabled"] = False
+        self._save_phrase_overlay("%s %s" % (intent, "on" if on else "off"))
+
+    def _add_phrase(self, intent, text):
+        """Returns an atcai_phrases.Check. Only writes when it passes."""
+        result = atcai_phrases.check_phrase(text, intent, self._phrases_in_force(),
+                                           variants=atcai_listen.expand_phrases)
+        if not result.ok:
+            return result
+
+        phrase = atcai_phrases.normalise(text)
+        entry = self._entry_for(intent)
+        removed = entry.get("remove") or []
+        if phrase in removed:
+            # Putting back a shipped phrase they had removed. Dropping the removal is
+            # the same thing as adding it, and leaves a cleaner file.
+            entry["remove"] = [p for p in removed if p != phrase]
+        else:
+            entry["add"] = sorted(set((entry.get("add") or []) + [phrase]))
+        self._save_phrase_overlay('%s: added "%s"' % (intent, phrase))
+        return result
+
+    def _remove_phrase(self, intent, phrase, shipped):
+        phrase = atcai_phrases.normalise(phrase)
+        entry = self._entry_for(intent)
+        added = entry.get("add") or []
+        if phrase in added:
+            entry["add"] = [p for p in added if p != phrase]
+        if phrase in [atcai_phrases.normalise(p) for p in shipped]:
+            entry["remove"] = sorted(set((entry.get("remove") or []) + [phrase]))
+        self._save_phrase_overlay('%s: removed "%s"' % (intent, phrase))
+
+    def _restore_command(self, intent):
+        self.phrase_overlay.pop(intent, None)
+        self._save_phrase_overlay("%s back to its shipped phrases" % intent)
+
+    def _restore_all_phrases(self):
+        if not self.phrase_overlay:
+            self._enqueue("voice", "nothing to restore - no commands have been changed")
+            return
+        if not messagebox.askyesno(
+                "Restore all defaults",
+                "Undo every change on this tab, for all %d commands you have changed?"
+                % len(self.phrase_overlay)):
+            return
+        self.phrase_overlay = {}
+        self._save_phrase_overlay("all commands back to their shipped phrases")
+
+    def _restart_listening(self):
+        if not self.listener.running:
+            self._enqueue("voice", "not listening - press Start on Talking to ATC")
+            return
+        self._enqueue("voice", "restarting so the vocabulary is rebuilt...")
+        self.listener.stop()
+        self._await_restart(0)
+
+    def _await_restart(self, attempts):
+        # stop() only asks; the recogniser notices at its next loop. Starting before the
+        # old thread has gone would be ignored - Bridge.start refuses while one is
+        # running - and the player would be left on the old vocabulary believing it had
+        # been rebuilt. So wait for it, and say so if it never goes.
+        if self.listener.running and attempts < 25:
+            self.after(200, lambda: self._await_restart(attempts + 1))
+            return
+        if self.listener.running:
+            self._enqueue("voice", "! the old recogniser has not stopped - press Stop "
+                                   "then Start on Talking to ATC")
+            return
+        self.listener.start(None)
+        self._enqueue("voice", "listening again, with your current commands")
+        self._refresh_bridge_buttons()
+
+    def _edit_command(self, intent):
+        """One command's phrases. Deliberately a dialog: the list is long enough already
+        without every row carrying an expanded editor."""
+        shipped = {}
+        for _, _, _, source in self._phrase_groups():
+            if intent in source:
+                shipped = source
+                break
+
+        dialog = tk.Toplevel(self)
+        dialog.title("What you say for: %s" % intent)
+        dialog.transient(self.winfo_toplevel())
+        dialog.columnconfigure(0, weight=1)
+        body = ttk.Frame(dialog, padding=PAD)
+        body.grid(sticky="nsew")
+        body.columnconfigure(0, weight=1)
+
+        ttk.Label(body, wraplength=460, justify="left", text=(
+            "Any of these works. The leading verb is expanded for you — "
+            '"request taxi" also matches "requesting taxi".'
+        )).grid(row=0, column=0, columnspan=2, sticky="w")
+
+        rows = ttk.Frame(body)
+        rows.grid(row=1, column=0, columnspan=2, sticky="ew", pady=(PAD, 0))
+        rows.columnconfigure(0, weight=1)
+
+        message = ttk.Label(body, wraplength=460, justify="left")
+        message.grid(row=3, column=0, columnspan=2, sticky="w", pady=(4, 0))
+
+        entry_var = tk.StringVar()
+
+        def redraw():
+            for child in rows.winfo_children():
+                child.destroy()
+            in_force = self._phrases_in_force().get(intent) or []
+            for i, phrase in enumerate(in_force):
+                ttk.Label(rows, text=phrase).grid(row=i, column=0, sticky="w")
+                ttk.Button(rows, text="Remove", width=8,
+                           command=lambda p=phrase: (
+                               self._remove_phrase(intent, p, shipped.get(intent) or []),
+                               redraw())).grid(row=i, column=1, sticky="e")
+            if not in_force:
+                ttk.Label(rows, foreground="#b45309",
+                          text="No phrases — this command cannot be spoken.").grid(
+                    row=0, column=0, sticky="w")
+
+        def add():
+            result = self._add_phrase(intent, entry_var.get())
+            if result.ok:
+                entry_var.set("")
+                redraw()
+            colour = {"refuse": "#b91c1c", "duplicate": "#b45309",
+                      "warn": "#b45309", "ok": "#15803d"}[result.level]
+            message.config(text=result.message or "Added.", foreground=colour)
+
+        add_row = ttk.Frame(body)
+        add_row.grid(row=2, column=0, columnspan=2, sticky="ew", pady=(PAD, 0))
+        add_row.columnconfigure(0, weight=1)
+        field = ttk.Entry(add_row, textvariable=entry_var)
+        field.grid(row=0, column=0, sticky="ew")
+        field.bind("<Return>", lambda _: add())
+        ttk.Button(add_row, text="Add", command=add).grid(row=0, column=1,
+                                                          padx=(PAD, 0))
+
+        buttons = ttk.Frame(body)
+        buttons.grid(row=4, column=0, columnspan=2, sticky="ew", pady=(PAD, 0))
+        ttk.Button(buttons, text="Restore shipped phrases",
+                   command=lambda: (self._restore_command(intent), redraw())).grid(
+            row=0, column=0, sticky="w")
+        ttk.Button(buttons, text="Close", command=dialog.destroy).grid(row=0, column=1,
+                                                                      sticky="e",
+                                                                      padx=(PAD, 0))
+        redraw()
+        return dialog
 
     def _build_settings(self, tabs):
         tab = ttk.Frame(tabs, padding=PAD)
@@ -722,6 +1101,8 @@ class App(ttk.Frame):
         self.atis_frequency.set(str(self.prefs["atis_frequency"]))
         self.comms_keys_enabled.set(bool(self.prefs["comms_keys_enabled"]))
         self.send_keys_enabled.set(bool(self.prefs["send_keys_enabled"]))
+        self.comms_confidence.set(float(self.prefs["comms_confidence"]))
+        self._refresh_comms_confidence()
         self.cockpit_enabled.set(bool(self.prefs["cockpit_keys_enabled"]))
         self.cockpit_send.set(bool(self.prefs["cockpit_send_enabled"]))
         self.cockpit_confidence.set(float(self.prefs["cockpit_confidence"]))
@@ -734,6 +1115,9 @@ class App(ttk.Frame):
         if self.auto_replies.get():
             self.speaker.start(None)
             started.append("replies")
+
+        for problem in self._phrase_problems:
+            self._enqueue("voice", "! %s" % problem)
 
         if started:
             self._enqueue("app", "started %s automatically" % " and ".join(started))
@@ -761,6 +1145,7 @@ class App(ttk.Frame):
             "atis_frequency": self.atis_frequency.get().strip() or "380.000",
             "comms_keys_enabled": bool(self.comms_keys_enabled.get()),
             "send_keys_enabled": bool(self.send_keys_enabled.get()),
+            "comms_confidence": round(float(self.comms_confidence.get()), 2),
             "cockpit_keys_enabled": bool(self.cockpit_enabled.get()),
             "cockpit_send_enabled": bool(self.cockpit_send.get()),
             "cockpit_confidence": round(float(self.cockpit_confidence.get()), 2),
@@ -1325,6 +1710,7 @@ class App(ttk.Frame):
             ptt_key_name=str(self.ptt_key_name),
             comms_keys=bool(self.comms_keys_enabled.get()),
             send_keys=bool(self.send_keys_enabled.get()),
+            comms_confidence=round(self.comms_confidence.get(), 2),
             cockpit_keys=bool(self.cockpit_enabled.get()),
             cockpit_send=bool(self.cockpit_send.get()),
             cockpit_confidence=round(self.cockpit_confidence.get(), 2),
@@ -1459,11 +1845,36 @@ def main():
 
     root = tk.Tk()
     root.title("ATCAI Manager %s" % VERSION)
-    root.geometry("900x700")
+    # Centred, and by the same arithmetic as the splash - the banner appears in the
+    # middle and the Manager replaces it there, rather than jumping to wherever Windows
+    # would have cascaded it.
+    root.geometry(splash.centred_geometry(root, 900, 700))
     # Below this the tab contents start clipping, which is how the Voice tab's options
     # went unnoticed in the first place.
     root.minsize(820, 600)
+
+    # Hidden until the splash has had its five seconds, so a half-built window never
+    # shows behind it. The splash comes *after* the single-instance check above: were it
+    # first, a second copy would flash a banner and vanish, which reads as a crash
+    # rather than as "already running".
+    banner = splash.Splash(root)
+    showing = banner.show()
+    if showing:
+        root.withdraw()
+
     app = App(root)
+
+    def reveal():
+        banner.dismiss()
+        root.deiconify()
+        root.lift()
+        root.focus_force()
+
+    if showing:
+        # Both paths call the same idempotent reveal, so a click and the timer arriving
+        # in either order is fine.
+        banner.on_dismiss = reveal
+        root.after(banner.remaining_ms(), reveal)
 
     def on_close():
         app._remember()

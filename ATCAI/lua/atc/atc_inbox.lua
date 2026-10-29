@@ -37,6 +37,7 @@ local INTENT_HANDLERS = {
     parking = "requestParking",
     loadout = "requestLoadout",
     emergency = "declareEmergency",
+    cancel_emergency = "cancelEmergency",
     vectors = "requestVectors",
     straight_in = "requestStraightIn",
 }

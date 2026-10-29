@@ -57,9 +57,18 @@ end
 ATC.AIRBASE_SEARCH_RADIUS = ATC.AIRBASE_SEARCH_RADIUS or 6000     -- metres, on the ground (~3 nm)
 ATC.AIRBASE_AIR_RADIUS = ATC.AIRBASE_AIR_RADIUS or 92600          -- metres, airborne (50 nm)
 
--- 276.375 is the F-15C's default UHF preset (CHAN 06) in the test mission; the rest are
--- common DCS defaults. If you don't hear ATC, check the frequency on your radio and add
--- it here — the two lists must stay the same length.
+-- The fallback list, used when a field's own frequencies are unknown, and added to
+-- every "wide" transmission so a refusal or an emergency reaches you whatever you are
+-- tuned to.
+--
+-- 276.375 heads the list for an unglamorous reason: it is what the first tester's F-15C
+-- radio happened to be showing. It is **not** a DCS default, an aircraft preset or a
+-- standard guard frequency - searched for, and it appears nowhere in DCS's own files or
+-- in the test missions. An earlier version of this comment claimed it was the F-15C's
+-- CHAN 06; that was wrong, and is recorded here so nobody rebuilds a decision on it.
+--
+-- The rest are common DCS mission frequencies. If you don't hear ATC, check the
+-- frequency on your radio and add it here - the two lists must stay the same length.
 ATC.TTS_FREQUENCY = ATC.TTS_FREQUENCY or "276.375,251.0,305.0,124.0,127.5"
 ATC.TTS_MODULATION = ATC.TTS_MODULATION or "AM,AM,AM,AM,AM"
 
@@ -641,6 +650,17 @@ end
 -- that would normally hold it - sequencing, phase order, being outside ATC range - gives
 -- way, which is the whole point of the call.
 function ATC.declareEmergency(params)
+    -- A declaration made while one is already running is almost always the recogniser
+    -- hearing a distress call in cockpit noise rather than a second emergency, so the
+    -- repeat is dropped in silence - before begin(), so it costs no transmission at all.
+    -- Measured 2026-10-28: 22 false triggers in ten minutes produced 8 transmissions,
+    -- and a tower that kept re-clearing a pilot who was already cleared.
+    -- Cancelling (ATC.cancelEmergency) is what lifts this.
+    local existing = ATC.state[params.unit:getName()]
+    if existing and existing.emergency then
+        return
+    end
+
     local ctx = begin(params, { anyDistance = true, wide = true })
     if not ctx then return end
 
@@ -663,6 +683,27 @@ function ATC.declareEmergency(params)
         .. "cleared to land, emergency vehicles standing by.",
         ctx.callsign, ctx.tower, steer, ATC.distanceText(ctx.distance),
         runwayText(ctx.conditions), ctx.conditions.windText, ctx.conditions.qnhText))
+end
+
+-- Lifts an emergency, so a mistaken or resolved declaration doesn't follow you for the
+-- rest of the flight. Needed on its own merits - until now there was no way to un-declare
+-- - and doubly so now that a repeat declaration is silent: without this, one false mayday
+-- would suppress a real one for the rest of the sortie.
+--
+-- The phase is deliberately left where it is. Cancelling says "the emergency is over",
+-- not "forget where I am"; by this point the pilot may genuinely be inbound.
+function ATC.cancelEmergency(params)
+    local ctx = begin(params, { anyDistance = true, wide = true })
+    if not ctx then return end
+
+    if not ctx.state.emergency then
+        ctx.say(string.format("%s, %s, no emergency on record.", ctx.callsign, ctx.tower))
+        return
+    end
+
+    ctx.state.emergency = nil
+    ctx.say(string.format("%s, %s, roger, cancelling your emergency. Say intentions.",
+        ctx.callsign, ctx.tower))
 end
 
 -- Where to go when you no longer know, or the field you came from isn't an option.

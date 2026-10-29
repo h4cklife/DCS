@@ -14,16 +14,21 @@ Usage, from the ATCAI directory:
 
     python tools/phrase_separability.py "gear up" "gear down"
 
-Say each phrase when prompted. Ctrl-C to stop early; the tally prints either way.
+Say each phrase when prompted, and **pause between repetitions**. The recogniser splits
+utterances on silence, so running them together makes it emit the tail of one attempt and
+the head of the next as a single event - which looks exactly like a misrecognition and is
+not one. The report calls out any pair that arrived too close together.
 """
 
 import argparse
 import collections
 import json
 import os
+import re
 import subprocess
 import sys
 import tempfile
+import time
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(os.path.dirname(HERE), "voice-bridge"))
@@ -35,8 +40,37 @@ def build_grammar(candidates):
     """The real phrase set plus the candidates, so competition is realistic."""
     lookup = dict(atcai_listen.phrase_to_intent())
     for phrase in candidates:
-        lookup[phrase.lower()] = "CANDIDATE:%s" % phrase.lower()
+        lookup[phrase.lower()] = CANDIDATE + phrase.lower()
     return lookup
+
+
+CANDIDATE = "CANDIDATE:"
+
+# Two recognitions closer together than this are very likely one intended utterance that
+# the recogniser split, rather than two attempts. Measured on a run where the operator
+# said "mayday mayday mayday" three times in quick succession: the words were right every
+# time, but the boundaries fell mid-phrase and three events looked like failures.
+FAST_GAP_SECONDS = 1.2
+
+
+def classify(spoken, matched, wanted):
+    """Which of three different things happened. The tool used to conflate the last two.
+
+    - ("candidate", phrase)  the candidate was heard and matched. What we want.
+    - ("routed", phrase)     the words were heard correctly, but something already in the
+                             grammar claimed them first. A phrase-overlap problem in the
+                             grammar, ours to fix - *not* an argument for re-phrasing the
+                             candidate, which is what the old wording advised.
+    - ("misheard", intent)   the recogniser produced different words. The only outcome
+                             that actually says the phrasing is too confusable.
+    """
+    if matched and matched.startswith(CANDIDATE):
+        return "candidate", matched.split(":", 1)[1]
+
+    present = [c for c in wanted if re.search(r"\b%s\b" % re.escape(c), spoken)]
+    if present:
+        return "routed", max(present, key=len)
+    return "misheard", matched
 
 
 def listen(lookup, rounds, candidates, say=print):
@@ -53,6 +87,8 @@ def listen(lookup, rounds, candidates, say=print):
 
     heard = collections.defaultdict(list)
     failed = []
+    fast = []
+    last_at = None
     wanted = [c.lower() for c in candidates]
     target = len(wanted) * rounds
 
@@ -74,6 +110,8 @@ def listen(lookup, rounds, candidates, say=print):
     say("Say each of these %d times, in any order:" % rounds)
     for phrase in wanted:
         say('   "%s"' % phrase)
+    say("Pause about a second between repetitions, or the recogniser will run them")
+    say("together and the result will be meaningless.")
     say("")
 
     count = 0
@@ -96,22 +134,34 @@ def listen(lookup, rounds, candidates, say=print):
             except ValueError:
                 continue
 
+            spoken = " ".join(text.lower().split())
             matched = atcai_listen.match_intent(text, lookup)
-            label = None
-            if matched and matched.startswith("CANDIDATE:"):
-                label = matched.split(":", 1)[1]
+            kind, detail = classify(spoken, matched, wanted)
 
-            if label:
-                heard[label].append(confidence)
+            now = time.monotonic()
+            gap = None if last_at is None else now - last_at
+            last_at = now
+            note = ""
+            if gap is not None and gap < FAST_GAP_SECONDS:
+                fast.append(gap)
+                note = "  [%.1fs after the last one]" % gap
+
+            if kind == "candidate":
+                heard[detail].append(confidence)
                 count += 1
-                say('  %2d/%d  heard "%s" -> %s (%.2f)'
-                    % (count, target, text, label, confidence))
+                say('  %2d/%d  heard "%s" -> %s (%.2f)%s'
+                    % (count, target, text, detail, confidence, note))
+            elif kind == "routed":
+                heard["ROUTED to %s" % matched].append(confidence)
+                say('  ??     heard "%s" (%.2f)%s' % (text, confidence, note))
+                say('         the words were right - "%s" is in there - but the grammar'
+                    % detail)
+                say('         matched %s first. Grammar problem, not a phrasing problem.'
+                    % matched)
             else:
-                # A candidate that resolved to something else entirely is the worst
-                # outcome, so it is recorded rather than ignored.
-                heard["OTHER: %s" % matched].append(confidence)
-                say('  !!     heard "%s" -> %s (%.2f) - NOT a candidate'
-                    % (text, matched, confidence))
+                heard["MISHEARD as %s" % matched].append(confidence)
+                say('  !!     heard "%s" -> %s (%.2f)%s - no candidate in the text'
+                    % (text, matched, confidence, note))
 
             if count >= target:
                 break
@@ -127,32 +177,53 @@ def listen(lookup, rounds, candidates, say=print):
 
     if failed:
         return None
-    return heard
+    return heard, fast
 
 
-def report(heard, candidates, rounds, say=print):
+def report(heard, fast, candidates, rounds, say=print):
     say("")
-    say("%-28s %5s  %8s  %8s" % ("outcome", "count", "min conf", "mean conf"))
-    say("-" * 56)
+    say("%-32s %5s  %8s  %8s" % ("outcome", "count", "min conf", "mean conf"))
+    say("-" * 60)
     for key in sorted(heard):
         values = heard[key]
-        say("%-28s %5d  %8.2f  %8.2f"
+        say("%-32s %5d  %8.2f  %8.2f"
             % (key, len(values), min(values), sum(values) / len(values)))
 
-    strays = [k for k in heard if k.startswith("OTHER")]
+    routed = [k for k in heard if k.startswith("ROUTED")]
+    misheard = [k for k in heard if k.startswith("MISHEARD")]
+    good = [k for k in heard if not k.startswith(("ROUTED", "MISHEARD"))]
     expected = len(candidates) * rounds
-    got = sum(len(v) for k, v in heard.items() if not k.startswith("OTHER"))
+    got = sum(len(heard[k]) for k in good)
 
     say("")
-    if strays:
-        say("VERDICT: not separable - %d utterance(s) matched something else entirely."
-            % sum(len(heard[k]) for k in strays))
+    if fast:
+        # Said before any verdict, because it can invalidate one.
+        say("NOTE: %d recognition(s) arrived within %.1fs of the previous one (closest"
+            % (len(fast), FAST_GAP_SECONDS))
+        say("      %.1fs). Those are probably one utterance the recogniser split, not"
+            % min(fast))
+        say("      separate attempts. Re-run with a clear pause between repetitions")
+        say("      before trusting anything below.")
+        say("")
+
+    if misheard:
+        say("VERDICT: not separable - %d utterance(s) came back as different words."
+            % sum(len(heard[k]) for k in misheard))
         say("Pick longer, less similar phrasings.")
+    elif routed:
+        # Deliberately not the same advice. The old version printed "pick longer, less
+        # similar phrasings" here too, which was the opposite of what the data said: the
+        # words had been heard perfectly.
+        say("VERDICT: heard correctly, but %d utterance(s) were claimed by a phrase"
+            % sum(len(heard[k]) for k in routed))
+        say("already in the grammar. The phrasing is fine; the grammar overlaps.")
+        say("Either remove the shorter competing phrase or accept the existing routing.")
+        say("This is not a reason to re-phrase the candidate.")
     elif got < expected:
         say("VERDICT: inconclusive - only %d of %d expected utterances were captured."
             % (got, expected))
     else:
-        lowest = min(min(v) for k, v in heard.items() if not k.startswith("OTHER"))
+        lowest = min(min(heard[k]) for k in good)
         say("VERDICT: each utterance matched a candidate. Lowest confidence %.2f."
             % lowest)
         say("Set the cockpit threshold below that, but only if you are satisfied none")
@@ -172,10 +243,11 @@ def main():
         return 1
 
     lookup = build_grammar(args.candidates)
-    heard = listen(lookup, args.rounds, args.candidates)
-    if heard is None:
+    result = listen(lookup, args.rounds, args.candidates)
+    if result is None:
         return 1
-    report(heard, args.candidates, args.rounds)
+    heard, fast = result
+    report(heard, fast, args.candidates, args.rounds)
     return 0
 
 
